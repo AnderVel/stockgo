@@ -16,21 +16,34 @@ class ProductoController extends Controller
         );
     }
 
-    public function buscarPorCodigo($codigo)
-    {
-        $producto = Producto::where(
-            'codigo_barras',
-            $codigo
-        )->first();
+   public function buscarPorCodigo($codigo)
+{
+    $producto = Producto::where(
+        'codigo_barras',
+        $codigo
+    )->first();
 
-        if (!$producto) {
-            return response()->json([
-                'mensaje' => 'Producto no encontrado.'
-            ], 404);
-        }
-
-        return response()->json($producto);
+    if (!$producto) {
+        return response()->json([
+            'mensaje' => 'Producto no encontrado.'
+        ], 404);
     }
+
+    $stockDisponible =
+        $producto->stock_fisico -
+        $producto->stock_reservado;
+
+    return response()->json([
+        'codigo_barras' => $producto->codigo_barras,
+        'nombre' => $producto->nombre,
+        'precio' => (float) $producto->precio,
+        'unidad_medida' => $producto->unidad_medida,
+        'stock_fisico' => $producto->stock_fisico,
+        'stock_disponible' => $stockDisponible,
+        'ubicacion' => $producto->ubicacion,
+        'estado' => $producto->estado,
+    ]);
+}
 
     public function store(Request $request)
     {

@@ -13,7 +13,7 @@ class Pedido extends Model
     protected $primaryKey = 'id_pedido';
 
     protected $fillable = [
-        'id_cliente',
+        'id_proveedor',
         'fecha_pedido',
         'estado',
         'total',
@@ -25,12 +25,12 @@ class Pedido extends Model
         'total' => 'decimal:2',
     ];
 
-    public function cliente(): BelongsTo
+    public function proveedor(): BelongsTo
     {
         return $this->belongsTo(
-            Cliente::class,
-            'id_cliente',
-            'id_cliente'
+            Proveedor::class,
+            'id_proveedor',
+            'id_proveedor'
         );
     }
 

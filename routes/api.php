@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClienteController;
 use App\Http\Controllers\Api\MovimientoController;
 use App\Http\Controllers\Api\PedidoController;
@@ -13,6 +14,16 @@ Route::get('/prueba', function () {
         'estado' => 'ok'
     ]);
 });
+
+Route::post(
+    '/auth/login',
+    [AuthController::class, 'login']
+);
+
+Route::get(
+    '/productos/{codigo_barras}',
+    [ProductoController::class, 'buscarPorCodigo']
+)->where('codigo_barras', '[0-9]{12,14}');
 
 Route::get(
     '/productos/codigo/{codigo}',
@@ -59,6 +70,11 @@ Route::post(
     [MovimientoController::class, 'ajuste']
 );
 
+Route::post(
+    '/inventario/movimiento',
+    [MovimientoController::class, 'movimiento']
+);
+
 Route::apiResource(
     'pedidos',
     PedidoController::class
@@ -72,6 +88,11 @@ Route::post(
 Route::post(
     '/pedidos/{pedido}/entregar',
     [PedidoController::class, 'entregar']
+);
+
+Route::post(
+    '/pedidos/{pedido}/recibir',
+    [PedidoController::class, 'recibir']
 );
 
 Route::post(
