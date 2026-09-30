@@ -8,7 +8,6 @@ use App\Http\Controllers\Api\ProductoController;
 use App\Http\Controllers\Api\ProveedorController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/prueba', function () {
     return response()->json([
         'mensaje' => 'API de StockGo funcionando',
         'estado' => 'ok',

@@ -15,7 +15,7 @@ class PedidoController extends Controller
     {
         return response()->json(
             Pedido::with([
-                'proveedor',
+                'cliente',
                 'detalles.producto',
             ])
                 ->orderByDesc('id_pedido')
@@ -26,48 +26,113 @@ class PedidoController extends Controller
     public function store(Request $request)
     {
         $datos = $request->validate([
-            'id_proveedor' =>
-                'required|exists:proveedores,id_proveedor',
+            'id_cliente' => [
+                'required',
+                'integer',
+                'exists:clientes,id_cliente',
+            ],
 
-            'fecha_pedido' =>
-                'required|date',
+            'fecha_pedido' => [
+                'required',
+                'date',
+            ],
 
-            'observaciones' =>
-                'nullable|string',
+            'observaciones' => [
+                'nullable',
+                'string',
+                'max:5000',
+            ],
 
-            'detalles' =>
-                'required|array|min:1',
+            'detalles' => [
+                'required',
+                'array',
+                'min:1',
+            ],
 
-            'detalles.*.id_producto' =>
-                'required|exists:productos,id_producto',
+            'detalles.*.id_producto' => [
+                'required',
+                'integer',
+                'distinct',
+                'exists:productos,id_producto',
+            ],
 
-            'detalles.*.cantidad' =>
-                'required|integer|min:1',
-
-            'detalles.*.precio_unitario' =>
-                'required|numeric|min:0',
+            'detalles.*.cantidad' => [
+                'required',
+                'integer',
+                'min:1',
+            ],
         ]);
 
-        $pedido = DB::transaction(function () use ($datos) {
+        $resultado = DB::transaction(function () use ($datos) {
+
+            $detallesEntrada = collect($datos['detalles'])
+                ->sortBy('id_producto')
+                ->values();
+
+            $productos = [];
+
+            foreach ($detallesEntrada as $detalle) {
+                $producto = Producto::where(
+                    'id_producto',
+                    $detalle['id_producto']
+                )
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                if ($producto->estado !== 'ACTIVO') {
+                    return [
+                        'error' => true,
+                        'status' => 422,
+                        'message' =>
+                            'El producto "' .
+                            $producto->nombre .
+                            '" no está disponible.',
+                    ];
+                }
+
+                if (
+                    $detalle['cantidad'] >
+                    $producto->stock_disponible
+                ) {
+                    return [
+                        'error' => true,
+                        'status' => 422,
+                        'message' =>
+                            'Stock disponible insuficiente para "' .
+                            $producto->nombre .
+                            '". Disponible: ' .
+                            $producto->stock_disponible .
+                            '.',
+                    ];
+                }
+
+                $productos[$producto->id_producto] = $producto;
+            }
+
             $pedido = Pedido::create([
-                'id_proveedor' => $datos['id_proveedor'],
+                'id_cliente' => $datos['id_cliente'],
                 'fecha_pedido' => $datos['fecha_pedido'],
                 'estado' => 'PENDIENTE',
                 'total' => 0,
-                'observaciones' => $datos['observaciones'] ?? null,
+                'observaciones' =>
+                    $datos['observaciones'] ?? null,
             ]);
 
             $total = 0;
 
-            foreach ($datos['detalles'] as $detalle) {
-                $producto = Producto::where(
-                    'id_producto',
-                    $detalle['id_producto']
-                )->firstOrFail();
+            foreach ($detallesEntrada as $detalle) {
+                $producto =
+                    $productos[$detalle['id_producto']];
+
+                $precioUnitario =
+                    (float) $producto->precio;
 
                 $subtotal =
-                    $detalle['cantidad'] *
-                    $detalle['precio_unitario'];
+                    round(
+                        $detalle['cantidad'] *
+                        $precioUnitario,
+                        2
+                    );
 
                 $pedido->detalles()->create([
                     'id_producto' =>
@@ -77,7 +142,276 @@ class PedidoController extends Controller
                         $detalle['cantidad'],
 
                     'precio_unitario' =>
-                        $detalle['precio_unitario'],
+                        $precioUnitario,
+
+                    'subtotal' =>
+                        $subtotal,
+                ]);
+
+                $producto->stock_reservado +=
+                    $detalle['cantidad'];
+
+                $producto->stock_disponible =
+                    $producto->stock_fisico -
+                    $producto->stock_reservado;
+
+                $producto->save();
+
+                $total += $subtotal;
+            }
+
+            $pedido->update([
+                'total' => $total,
+            ]);
+
+            return [
+                'error' => false,
+                'pedido' => $pedido->load([
+                    'cliente',
+                    'detalles.producto',
+                ]),
+            ];
+        });
+
+        if ($resultado['error']) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $resultado['message'],
+            ], $resultado['status']);
+        }
+
+        return response()->json(
+            $resultado['pedido'],
+            201
+        );
+    }
+
+    public function show(Pedido $pedido)
+    {
+        return response()->json(
+            $pedido->load([
+                'cliente',
+                'detalles.producto',
+                'movimientos',
+            ])
+        );
+    }
+
+    public function update(
+        Request $request,
+        Pedido $pedido
+    ) {
+        $datos = $request->validate([
+            'id_cliente' => [
+                'required',
+                'integer',
+                'exists:clientes,id_cliente',
+            ],
+
+            'fecha_pedido' => [
+                'required',
+                'date',
+            ],
+
+            'observaciones' => [
+                'nullable',
+                'string',
+                'max:5000',
+            ],
+
+            'detalles' => [
+                'required',
+                'array',
+                'min:1',
+            ],
+
+            'detalles.*.id_producto' => [
+                'required',
+                'integer',
+                'distinct',
+                'exists:productos,id_producto',
+            ],
+
+            'detalles.*.cantidad' => [
+                'required',
+                'integer',
+                'min:1',
+            ],
+        ]);
+
+        $resultado = DB::transaction(function () use (
+            $datos,
+            $pedido
+        ) {
+            $pedido = Pedido::where(
+                'id_pedido',
+                $pedido->id_pedido
+            )
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($pedido->estado !== 'PENDIENTE') {
+                return [
+                    'error' => true,
+                    'status' => 409,
+                    'message' =>
+                        'Solo se pueden modificar pedidos pendientes.',
+                ];
+            }
+
+            $detallesActuales = $pedido->detalles()
+                ->lockForUpdate()
+                ->get();
+
+            $actuales = $detallesActuales->keyBy(
+                'id_producto'
+            );
+
+            $nuevos = collect($datos['detalles'])
+                ->sortBy('id_producto')
+                ->values()
+                ->keyBy('id_producto');
+
+            $idsProductos = collect(
+                $actuales->keys()
+            )
+                ->merge($nuevos->keys())
+                ->unique()
+                ->sort()
+                ->values();
+
+            $productos = [];
+
+            foreach ($idsProductos as $idProducto) {
+                $productos[$idProducto] =
+                    Producto::where(
+                        'id_producto',
+                        $idProducto
+                    )
+                        ->lockForUpdate()
+                        ->firstOrFail();
+            }
+
+            foreach ($idsProductos as $idProducto) {
+                $cantidadActual =
+                    isset($actuales[$idProducto])
+                        ? (int) $actuales[$idProducto]->cantidad
+                        : 0;
+
+                $cantidadNueva =
+                    isset($nuevos[$idProducto])
+                        ? (int) $nuevos[$idProducto]['cantidad']
+                        : 0;
+
+                $diferencia =
+                    $cantidadNueva -
+                    $cantidadActual;
+
+                $producto =
+                    $productos[$idProducto];
+
+                if (
+                    $cantidadNueva > 0 &&
+                    $producto->estado !== 'ACTIVO'
+                ) {
+                    return [
+                        'error' => true,
+                        'status' => 422,
+                        'message' =>
+                            'El producto "' .
+                            $producto->nombre .
+                            '" no está disponible.',
+                    ];
+                }
+
+                if (
+                    $diferencia > 0 &&
+                    $diferencia >
+                    $producto->stock_disponible
+                ) {
+                    return [
+                        'error' => true,
+                        'status' => 422,
+                        'message' =>
+                            'No hay stock suficiente para aumentar "' .
+                            $producto->nombre .
+                            '". Disponible: ' .
+                            $producto->stock_disponible .
+                            '.',
+                    ];
+                }
+
+                if (
+                    $diferencia < 0 &&
+                    abs($diferencia) >
+                    $producto->stock_reservado
+                ) {
+                    return [
+                        'error' => true,
+                        'status' => 409,
+                        'message' =>
+                            'La reserva de "' .
+                            $producto->nombre .
+                            '" presenta una inconsistencia.',
+                    ];
+                }
+            }
+
+            foreach ($idsProductos as $idProducto) {
+                $cantidadActual =
+                    isset($actuales[$idProducto])
+                        ? (int) $actuales[$idProducto]->cantidad
+                        : 0;
+
+                $cantidadNueva =
+                    isset($nuevos[$idProducto])
+                        ? (int) $nuevos[$idProducto]['cantidad']
+                        : 0;
+
+                $diferencia =
+                    $cantidadNueva -
+                    $cantidadActual;
+
+                $producto =
+                    $productos[$idProducto];
+
+                $producto->stock_reservado +=
+                    $diferencia;
+
+                $producto->stock_disponible =
+                    $producto->stock_fisico -
+                    $producto->stock_reservado;
+
+                $producto->save();
+            }
+
+            $pedido->detalles()->delete();
+
+            $total = 0;
+
+            foreach ($nuevos as $detalle) {
+                $producto =
+                    $productos[$detalle['id_producto']];
+
+                $precioUnitario =
+                    (float) $producto->precio;
+
+                $subtotal =
+                    round(
+                        $detalle['cantidad'] *
+                        $precioUnitario,
+                        2
+                    );
+
+                $pedido->detalles()->create([
+                    'id_producto' =>
+                        $producto->id_producto,
+
+                    'cantidad' =>
+                        $detalle['cantidad'],
+
+                    'precio_unitario' =>
+                        $precioUnitario,
 
                     'subtotal' =>
                         $subtotal,
@@ -87,140 +421,119 @@ class PedidoController extends Controller
             }
 
             $pedido->update([
+                'id_cliente' => $datos['id_cliente'],
+                'fecha_pedido' => $datos['fecha_pedido'],
                 'total' => $total,
+                'observaciones' =>
+                    $datos['observaciones'] ?? null,
             ]);
 
-            return $pedido;
+            return [
+                'error' => false,
+                'pedido' => $pedido->load([
+                    'cliente',
+                    'detalles.producto',
+                ]),
+            ];
         });
 
-        return response()->json(
-            $pedido->load([
-                'proveedor',
-                'detalles.producto',
-            ]),
-            201
-        );
-    }
-
-    public function show(Pedido $pedido)
-    {
-        return response()->json(
-            $pedido->load([
-                'proveedor',
-                'detalles.producto',
-                'movimientos',
-            ])
-        );
-    }
-
-    public function update(Request $request, Pedido $pedido)
-    {
-        if (
-            in_array(
-                $pedido->estado,
-                ['ENVIADO', 'RECIBIDO', 'CANCELADO']
-            )
-        ) {
+        if ($resultado['error']) {
             return response()->json([
-                'mensaje' =>
-                    'Este pedido ya no puede modificarse.'
-            ], 409);
+                'status' => 'error',
+                'message' => $resultado['message'],
+            ], $resultado['status']);
         }
 
-        $datos = $request->validate([
-            'id_proveedor' =>
-                'required|exists:proveedores,id_proveedor',
-
-            'fecha_pedido' =>
-                'required|date',
-
-            'observaciones' =>
-                'nullable|string',
-        ]);
-
-        $pedido->update($datos);
-
         return response()->json(
-            $pedido->load([
-                'proveedor',
-                'detalles.producto',
-            ])
+            $resultado['pedido']
         );
     }
 
     public function surtir(Pedido $pedido)
     {
-        if ($pedido->estado !== 'PENDIENTE') {
-            return response()->json([
-                'mensaje' =>
-                    'El pedido no se puede poner en proceso en su estado actual.'
-            ], 409);
-        }
-
-        $pedido->update([
-            'estado' => 'EN_PROCESO',
-        ]);
-
-        return response()->json(
-            $pedido->load([
-                'proveedor',
-                'detalles.producto',
-            ])
-        );
-    }
-
-    public function entregar(Pedido $pedido)
-    {
-        if ($pedido->estado !== 'EN_PROCESO') {
-            return response()->json([
-                'mensaje' =>
-                    'El pedido debe estar en proceso antes de marcarlo como enviado.'
-            ], 409);
-        }
-
-        $pedido->update([
-            'estado' => 'ENVIADO',
-        ]);
-
-        return response()->json(
-            $pedido->load([
-                'proveedor',
-                'detalles.producto',
-            ])
-        );
-    }
-
-    public function recibir(Pedido $pedido)
-    {
         $resultado = DB::transaction(function () use ($pedido) {
+
             $pedido = Pedido::where(
                 'id_pedido',
                 $pedido->id_pedido
             )
                 ->lockForUpdate()
-                ->with('detalles')
                 ->firstOrFail();
 
-            if (
-                !in_array(
-                    $pedido->estado,
-                    ['ENVIADO']
-                )
-            ) {
-                return null;
+            if ($pedido->estado !== 'PENDIENTE') {
+                return [
+                    'error' => true,
+                    'status' => 409,
+                    'message' =>
+                        'El pedido no está pendiente de surtido.',
+                ];
             }
 
-            foreach ($pedido->detalles as $detalle) {
-                $producto = Producto::where(
-                    'id_producto',
-                    $detalle->id_producto
-                )
-                    ->lockForUpdate()
-                    ->firstOrFail();
+            $detalles = $pedido->detalles()
+                ->lockForUpdate()
+                ->get();
 
-                $stockAnterior = $producto->stock_fisico;
+            $idsProductos = $detalles
+                ->pluck('id_producto')
+                ->sort()
+                ->values();
 
-                $producto->stock_fisico +=
+            $productos = [];
+
+            foreach ($idsProductos as $idProducto) {
+                $productos[$idProducto] =
+                    Producto::where(
+                        'id_producto',
+                        $idProducto
+                    )
+                        ->lockForUpdate()
+                        ->firstOrFail();
+            }
+
+            foreach ($detalles as $detalle) {
+                $producto =
+                    $productos[$detalle->id_producto];
+
+                if (
+                    $producto->stock_fisico <
+                    $detalle->cantidad
+                ) {
+                    return [
+                        'error' => true,
+                        'status' => 409,
+                        'message' =>
+                            'El stock físico ya no permite surtir el producto "' .
+                            $producto->nombre .
+                            '".',
+                    ];
+                }
+
+                if (
+                    $producto->stock_reservado <
+                    $detalle->cantidad
+                ) {
+                    return [
+                        'error' => true,
+                        'status' => 409,
+                        'message' =>
+                            'La reserva del producto "' .
+                            $producto->nombre .
+                            '" presenta una inconsistencia.',
+                    ];
+                }
+            }
+
+            foreach ($detalles as $detalle) {
+                $producto =
+                    $productos[$detalle->id_producto];
+
+                $stockAnterior =
+                    $producto->stock_fisico;
+
+                $producto->stock_fisico -=
+                    $detalle->cantidad;
+
+                $producto->stock_reservado -=
                     $detalle->cantidad;
 
                 $producto->stock_disponible =
@@ -233,21 +546,17 @@ class PedidoController extends Controller
                     'id_producto' =>
                         $producto->id_producto,
 
-                    'tipo' =>
-                        'ENTRADA',
+                    'tipo' => 'SALIDA',
 
                     'cantidad' =>
                         $detalle->cantidad,
 
                     'motivo' =>
-                        'Recepción del pedido #' .
+                        'Salida por surtido del pedido #' .
                         $pedido->id_pedido,
 
                     'id_pedido' =>
                         $pedido->id_pedido,
-
-                    'id_proveedor' =>
-                        $pedido->id_proveedor,
 
                     'stock_anterior' =>
                         $stockAnterior,
@@ -258,76 +567,201 @@ class PedidoController extends Controller
             }
 
             $pedido->update([
-                'estado' => 'RECIBIDO',
+                'estado' => 'SURTIDO',
             ]);
 
-            return $pedido->load([
-                'proveedor',
-                'detalles.producto',
-                'movimientos',
-            ]);
+            return [
+                'error' => false,
+                'pedido' => $pedido->load([
+                    'cliente',
+                    'detalles.producto',
+                    'movimientos',
+                ]),
+            ];
         });
 
-        if (!$resultado) {
+        if ($resultado['error']) {
             return response()->json([
-                'mensaje' =>
-                    'El pedido no puede recibirse en su estado actual.'
-            ], 409);
+                'status' => 'error',
+                'message' => $resultado['message'],
+            ], $resultado['status']);
         }
 
         return response()->json([
-            'mensaje' =>
-                'Pedido recibido correctamente. El inventario fue actualizado.',
+            'status' => 'success',
+            'message' =>
+                'Pedido surtido correctamente. El inventario fue actualizado.',
             'pedido' =>
-                $resultado,
+                $resultado['pedido'],
         ]);
     }
 
-    public function cancelar(Pedido $pedido)
+    public function entregar(Pedido $pedido)
     {
-        if (
-            in_array(
-                $pedido->estado,
-                ['RECIBIDO', 'CANCELADO']
-            )
-        ) {
+        if ($pedido->estado !== 'SURTIDO') {
             return response()->json([
-                'mensaje' =>
-                    'El pedido no puede cancelarse en su estado actual.'
+                'status' => 'error',
+                'message' =>
+                    'El pedido debe estar surtido antes de marcarlo como enviado.',
             ], 409);
         }
 
         $pedido->update([
-            'estado' => 'CANCELADO',
+            'estado' => 'ENVIADO',
         ]);
 
         return response()->json([
-            'mensaje' =>
-                'Pedido cancelado correctamente.',
+            'status' => 'success',
+            'message' =>
+                'Pedido marcado como enviado.',
             'pedido' =>
                 $pedido->load([
-                    'proveedor',
+                    'cliente',
                     'detalles.producto',
                 ]),
         ]);
     }
 
+    public function recibir(Pedido $pedido)
+    {
+        if ($pedido->estado !== 'ENVIADO') {
+            return response()->json([
+                'status' => 'error',
+                'message' =>
+                    'El pedido debe estar enviado antes de marcarlo como entregado.',
+            ], 409);
+        }
+
+        $pedido->update([
+            'estado' => 'ENTREGADO',
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' =>
+                'Pedido entregado correctamente.',
+            'pedido' =>
+                $pedido->load([
+                    'cliente',
+                    'detalles.producto',
+                ]),
+        ]);
+    }
+
+    public function cancelar(Pedido $pedido)
+    {
+        $resultado = DB::transaction(function () use ($pedido) {
+
+            $pedido = Pedido::where(
+                'id_pedido',
+                $pedido->id_pedido
+            )
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($pedido->estado !== 'PENDIENTE') {
+                return [
+                    'error' => true,
+                    'status' => 409,
+                    'message' =>
+                        'Solo se pueden cancelar pedidos pendientes.',
+                ];
+            }
+
+            $detalles = $pedido->detalles()
+                ->lockForUpdate()
+                ->get();
+
+            $idsProductos = $detalles
+                ->pluck('id_producto')
+                ->sort()
+                ->values();
+
+            $productos = [];
+
+            foreach ($idsProductos as $idProducto) {
+                $productos[$idProducto] =
+                    Producto::where(
+                        'id_producto',
+                        $idProducto
+                    )
+                        ->lockForUpdate()
+                        ->firstOrFail();
+            }
+
+            foreach ($detalles as $detalle) {
+                $producto =
+                    $productos[$detalle->id_producto];
+
+                if (
+                    $producto->stock_reservado <
+                    $detalle->cantidad
+                ) {
+                    return [
+                        'error' => true,
+                        'status' => 409,
+                        'message' =>
+                            'La reserva del producto "' .
+                            $producto->nombre .
+                            '" presenta una inconsistencia.',
+                    ];
+                }
+
+                $producto->stock_reservado -=
+                    $detalle->cantidad;
+
+                $producto->stock_disponible =
+                    $producto->stock_fisico -
+                    $producto->stock_reservado;
+
+                $producto->save();
+            }
+
+            $pedido->update([
+                'estado' => 'CANCELADO',
+            ]);
+
+            return [
+                'error' => false,
+                'pedido' => $pedido->load([
+                    'cliente',
+                    'detalles.producto',
+                ]),
+            ];
+        });
+
+        if ($resultado['error']) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $resultado['message'],
+            ], $resultado['status']);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' =>
+                'Pedido cancelado y reserva liberada correctamente.',
+            'pedido' =>
+                $resultado['pedido'],
+        ]);
+    }
+
     public function destroy(Pedido $pedido)
     {
-        if (
-            $pedido->estado !== 'CANCELADO'
-        ) {
+        if ($pedido->estado !== 'CANCELADO') {
             return response()->json([
-                'mensaje' =>
-                    'Primero debes cancelar el pedido.'
+                'status' => 'error',
+                'message' =>
+                    'Primero debes cancelar el pedido.',
             ], 409);
         }
 
         $pedido->delete();
 
         return response()->json([
-            'mensaje' =>
-                'Pedido eliminado correctamente.'
+            'status' => 'success',
+            'message' =>
+                'Pedido eliminado correctamente.',
         ]);
     }
 }
