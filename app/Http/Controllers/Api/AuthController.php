@@ -290,6 +290,13 @@ class AuthController extends Controller
     {
         $request->user()->currentAccessToken()?->delete();
 
+        if ($request->filled('refresh_token')) {
+            \App\Models\WebRefreshToken::where(
+                'token_hash',
+                hash('sha256', $request->input('refresh_token'))
+            )->update(['revoked_at' => now()]);
+        }
+
         app(AuditoriaService::class)->registrar(
             'LOGOUT',
             'AUTH',

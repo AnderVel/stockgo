@@ -43,6 +43,13 @@ return [
             'clients.create',
             'clients.update',
             'clients.delete',
+
+            'users.view',
+            'users.create',
+            'users.update',
+            'users.reset_2fa',
+
+            'audit.view',
         ],
 
     ],

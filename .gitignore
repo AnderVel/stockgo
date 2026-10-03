@@ -30,3 +30,7 @@ Thumbs.db
 # Configuración local de agentes/skills
 AGENTS.md
 .opencode/
+
+# Web Admin
+/web-admin/node_modules
+/web-admin/dist
