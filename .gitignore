@@ -26,3 +26,7 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 /backups/
+
+# Configuración local de agentes/skills
+AGENTS.md
+.opencode/
