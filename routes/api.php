@@ -8,7 +8,8 @@ use App\Http\Controllers\Api\ProductoController;
 use App\Http\Controllers\Api\ProveedorController;
 use Illuminate\Support\Facades\Route;
 
-Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/login', [AuthController::class, 'login'])
+    ->middleware('throttle:30,1');
 
 Route::middleware([
     'auth:sanctum',
@@ -32,12 +33,13 @@ Route::middleware([
     Route::post(
         '/auth/2fa/verify',
         [AuthController::class, 'verifyTwoFactor']
-    );
+    )->middleware('throttle:30,1');
 });
 
 Route::middleware([
     'auth:sanctum',
     'abilities:api-access',
+    'throttle:120,1',
 ])->group(function () {
 
     Route::get(

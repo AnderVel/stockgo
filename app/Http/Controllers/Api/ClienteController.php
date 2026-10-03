@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Cliente;
+use App\Services\AuditoriaService;
 use Illuminate\Http\Request;
 
 class ClienteController extends Controller
@@ -61,6 +62,14 @@ class ClienteController extends Controller
         }
 
         $cliente->delete();
+
+        app(AuditoriaService::class)->registrar(
+            'ELIMINAR',
+            'CLIENTES',
+            'Cliente eliminado.',
+            ['id_cliente' => $cliente->id_cliente],
+            request()
+        );
 
         return response()->json([
             'mensaje' => 'Cliente eliminado correctamente.'

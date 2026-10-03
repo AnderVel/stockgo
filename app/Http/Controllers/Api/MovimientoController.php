@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Movimiento;
 use App\Models\Producto;
+use App\Services\AuditoriaService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -72,6 +73,18 @@ class MovimientoController extends Controller
             ]);
         });
 
+        app(AuditoriaService::class)->registrar(
+            'CREAR',
+            'MOVIMIENTOS',
+            'Entrada de mercancía registrada.',
+            [
+                'id_producto' => $datos['id_producto'],
+                'cantidad' => $datos['cantidad'],
+                'id_proveedor' => $datos['id_proveedor'] ?? null,
+            ],
+            $request
+        );
+
         return response()->json(
             $movimiento->load('producto', 'proveedor'),
             201
@@ -129,6 +142,18 @@ class MovimientoController extends Controller
                 'message' => 'Stock disponible insuficiente.'
             ], 422);
         }
+
+        app(AuditoriaService::class)->registrar(
+            'CREAR',
+            'MOVIMIENTOS',
+            'Salida de mercancía registrada.',
+            [
+                'id_producto' => $datos['id_producto'],
+                'cantidad' => $datos['cantidad'],
+                'id_pedido' => $datos['id_pedido'] ?? null,
+            ],
+            $request
+        );
 
         return response()->json(
             $movimiento->load('producto', 'pedido'),
@@ -191,6 +216,18 @@ class MovimientoController extends Controller
             ], 422);
         }
 
+        app(AuditoriaService::class)->registrar(
+            'CREAR',
+            'MOVIMIENTOS',
+            'Ajuste de inventario registrado.',
+            [
+                'id_producto' => $datos['id_producto'],
+                'cantidad' => $datos['cantidad'],
+                'motivo' => $datos['motivo'],
+            ],
+            $request
+        );
+
         return response()->json(
             $movimiento->load('producto'),
             201
@@ -203,7 +240,9 @@ class MovimientoController extends Controller
             'codigo_barras' => 'required|string',
             'tipo_movimiento' => 'required|in:recepcion,picking',
             'cantidad' => 'required|integer|min:1',
-            'usuario_id' => 'required|integer|min:1',
+            // Se acepta por compatibilidad con Android pero ya NO se confía en él:
+            // la identidad del operador siempre es la del token autenticado.
+            'usuario_id' => 'nullable|integer|min:1',
         ]);
 
         $resultado = DB::transaction(function () use ($datos) {
@@ -302,6 +341,18 @@ class MovimientoController extends Controller
                 'message' => $resultado['mensaje']
             ], 422);
         }
+
+        app(AuditoriaService::class)->registrar(
+            'CREAR',
+            'INVENTARIO',
+            'Movimiento registrado desde dispositivo.',
+            [
+                'codigo_barras' => $datos['codigo_barras'],
+                'tipo_movimiento' => $datos['tipo_movimiento'],
+                'cantidad' => $datos['cantidad'],
+            ],
+            $request
+        );
 
         return response()->json([
             'status' => 'success',

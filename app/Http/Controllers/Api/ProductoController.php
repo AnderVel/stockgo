@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Producto;
+use App\Services\AuditoriaService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -86,6 +87,14 @@ class ProductoController extends Controller
 
         $producto = Producto::create($datos);
 
+        app(AuditoriaService::class)->registrar(
+            'CREAR',
+            'PRODUCTOS',
+            'Producto creado.',
+            ['id_producto' => $producto->id_producto],
+            $request
+        );
+
         return response()->json(
             $producto,
             201
@@ -134,6 +143,14 @@ class ProductoController extends Controller
 
         $producto->update($datos);
 
+        app(AuditoriaService::class)->registrar(
+            'ACTUALIZAR',
+            'PRODUCTOS',
+            'Producto actualizado.',
+            ['id_producto' => $producto->id_producto],
+            $request
+        );
+
         return response()->json($producto);
     }
 
@@ -149,6 +166,14 @@ class ProductoController extends Controller
         }
 
         $producto->delete();
+
+        app(AuditoriaService::class)->registrar(
+            'ELIMINAR',
+            'PRODUCTOS',
+            'Producto eliminado.',
+            ['id_producto' => $producto->id_producto],
+            request()
+        );
 
         return response()->json([
             'mensaje' =>

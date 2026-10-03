@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Movimiento;
 use App\Models\Pedido;
 use App\Models\Producto;
+use App\Services\AuditoriaService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -179,6 +180,14 @@ class PedidoController extends Controller
                 'message' => $resultado['message'],
             ], $resultado['status']);
         }
+
+        app(AuditoriaService::class)->registrar(
+            'CREAR',
+            'PEDIDOS',
+            'Pedido creado.',
+            ['id_pedido' => $resultado['pedido']->id_pedido],
+            $request
+        );
 
         return response()->json(
             $resultado['pedido'],
@@ -444,6 +453,14 @@ class PedidoController extends Controller
             ], $resultado['status']);
         }
 
+        app(AuditoriaService::class)->registrar(
+            'ACTUALIZAR',
+            'PEDIDOS',
+            'Pedido actualizado.',
+            ['id_pedido' => $resultado['pedido']->id_pedido],
+            $request
+        );
+
         return response()->json(
             $resultado['pedido']
         );
@@ -587,6 +604,14 @@ class PedidoController extends Controller
             ], $resultado['status']);
         }
 
+        app(AuditoriaService::class)->registrar(
+            'SURTIR',
+            'PEDIDOS',
+            'Pedido surtido.',
+            ['id_pedido' => $pedido->id_pedido],
+            request()
+        );
+
         return response()->json([
             'status' => 'success',
             'message' =>
@@ -609,6 +634,14 @@ class PedidoController extends Controller
         $pedido->update([
             'estado' => 'ENVIADO',
         ]);
+
+        app(AuditoriaService::class)->registrar(
+            'ENTREGAR',
+            'PEDIDOS',
+            'Pedido marcado como enviado.',
+            ['id_pedido' => $pedido->id_pedido],
+            request()
+        );
 
         return response()->json([
             'status' => 'success',
@@ -635,6 +668,14 @@ class PedidoController extends Controller
         $pedido->update([
             'estado' => 'ENTREGADO',
         ]);
+
+        app(AuditoriaService::class)->registrar(
+            'RECIBIR',
+            'PEDIDOS',
+            'Pedido entregado.',
+            ['id_pedido' => $pedido->id_pedido],
+            request()
+        );
 
         return response()->json([
             'status' => 'success',
@@ -737,6 +778,14 @@ class PedidoController extends Controller
             ], $resultado['status']);
         }
 
+        app(AuditoriaService::class)->registrar(
+            'CANCELAR',
+            'PEDIDOS',
+            'Pedido cancelado.',
+            ['id_pedido' => $pedido->id_pedido],
+            request()
+        );
+
         return response()->json([
             'status' => 'success',
             'message' =>
@@ -757,6 +806,14 @@ class PedidoController extends Controller
         }
 
         $pedido->delete();
+
+        app(AuditoriaService::class)->registrar(
+            'ELIMINAR',
+            'PEDIDOS',
+            'Pedido eliminado.',
+            ['id_pedido' => $pedido->id_pedido],
+            request()
+        );
 
         return response()->json([
             'status' => 'success',

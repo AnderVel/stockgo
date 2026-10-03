@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Proveedor;
+use App\Services\AuditoriaService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -59,7 +60,21 @@ class ProveedorController extends Controller
 
     public function destroy(Proveedor $proveedor)
     {
+        if ($proveedor->movimientos()->exists()) {
+            return response()->json([
+                'mensaje' => 'No se puede eliminar un proveedor con movimientos registrados.'
+            ], 409);
+        }
+
         $proveedor->delete();
+
+        app(AuditoriaService::class)->registrar(
+            'ELIMINAR',
+            'PROVEEDORES',
+            'Proveedor eliminado.',
+            ['id_proveedor' => $proveedor->id_proveedor],
+            request()
+        );
 
         return response()->json([
             'mensaje' => 'Proveedor eliminado correctamente.'
