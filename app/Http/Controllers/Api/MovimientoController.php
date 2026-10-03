@@ -9,6 +9,7 @@ use App\Services\AuditoriaService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+
 class MovimientoController extends Controller
 {
     public function index()
@@ -70,6 +71,7 @@ class MovimientoController extends Controller
                 'id_proveedor' => $datos['id_proveedor'] ?? null,
                 'stock_anterior' => $stockAnterior,
                 'stock_nuevo' => $producto->stock_fisico,
+                'usuario_id' => auth()->id(),
             ]);
         });
 
@@ -133,6 +135,7 @@ class MovimientoController extends Controller
                 'id_pedido' => $datos['id_pedido'] ?? null,
                 'stock_anterior' => $stockAnterior,
                 'stock_nuevo' => $producto->stock_fisico,
+                'usuario_id' => auth()->id(),
             ]);
         });
 
@@ -205,6 +208,7 @@ class MovimientoController extends Controller
                 'motivo' => $datos['motivo'],
                 'stock_anterior' => $stockAnterior,
                 'stock_nuevo' => $producto->stock_fisico,
+                'usuario_id' => auth()->id(),
             ]);
         });
 
@@ -285,6 +289,7 @@ class MovimientoController extends Controller
                     'motivo' => 'Recepción de mercancía',
                     'stock_anterior' => $stockAnterior,
                     'stock_nuevo' => $producto->stock_fisico,
+                'usuario_id' => auth()->id(),
                 ]);
 
                 return [
@@ -328,6 +333,7 @@ class MovimientoController extends Controller
                 'motivo' => 'Picking desde Android',
                 'stock_anterior' => $stockAnterior,
                 'stock_nuevo' => $producto->stock_fisico,
+                'usuario_id' => auth()->id(),
             ]);
 
             return [

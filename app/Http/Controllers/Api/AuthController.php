@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\AuditoriaService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
@@ -39,6 +40,14 @@ class AuthController extends Controller
         ) {
             RateLimiter::hit($key, 60);
 
+            app(AuditoriaService::class)->registrar(
+                'LOGIN_FALLIDO',
+                'AUTH',
+                'Intento de inicio de sesión fallido.',
+                ['usuario' => $usuario],
+                $request
+            );
+
             return response()->json([
                 'status' => 'error',
                 'message' => 'Usuario o contraseña incorrectos.',
@@ -56,6 +65,14 @@ class AuthController extends Controller
                 now()->addMinutes(10)
             )->plainTextToken;
 
+            app(AuditoriaService::class)->registrar(
+                'LOGIN',
+                'AUTH',
+                'Credenciales válidas; requiere configuración de 2FA.',
+                ['usuario' => $user->username],
+                $request
+            );
+
             return response()->json([
                 'status' => 'success',
                 'two_factor_setup_required' => true,
@@ -70,6 +87,14 @@ class AuthController extends Controller
             ['2fa-verify'],
             now()->addMinutes(5)
         )->plainTextToken;
+
+        app(AuditoriaService::class)->registrar(
+            'LOGIN',
+            'AUTH',
+            'Credenciales válidas; requiere verificación 2FA.',
+            ['usuario' => $user->username],
+            $request
+        );
 
         return response()->json([
             'status' => 'success',
@@ -160,6 +185,14 @@ class AuthController extends Controller
             now()->addHours(8)
         )->plainTextToken;
 
+        app(AuditoriaService::class)->registrar(
+            '2FA_ACTIVADO',
+            'AUTH',
+            '2FA activado correctamente.',
+            [],
+            $request
+        );
+
         return response()->json([
             'status' => 'success',
             'message' => 'Autenticación de dos factores activada correctamente.',
@@ -222,6 +255,14 @@ class AuthController extends Controller
 
         $deviceName = $datos['device_name'] ?? 'android-stockgo';
 
+        app(AuditoriaService::class)->registrar(
+            '2FA_VERIFICADO',
+            'AUTH',
+            'Verificación 2FA exitosa.',
+            [],
+            $request
+        );
+
         $token = $user->createToken(
             $deviceName,
             ['api-access'],
@@ -248,6 +289,14 @@ class AuthController extends Controller
     public function logout(Request $request)
     {
         $request->user()->currentAccessToken()?->delete();
+
+        app(AuditoriaService::class)->registrar(
+            'LOGOUT',
+            'AUTH',
+            'Sesión cerrada.',
+            [],
+            $request
+        );
 
         return response()->json([
             'status' => 'success',

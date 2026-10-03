@@ -20,6 +20,7 @@ class Movimiento extends Model
         'id_proveedor',
         'stock_anterior',
         'stock_nuevo',
+        'usuario_id',
     ];
 
     protected $casts = [
@@ -52,6 +53,15 @@ class Movimiento extends Model
             Proveedor::class,
             'id_proveedor',
             'id_proveedor'
+        );
+    }
+
+    public function usuario(): BelongsTo
+    {
+        return $this->belongsTo(
+            User::class,
+            'usuario_id',
+            'id'
         );
     }
 }

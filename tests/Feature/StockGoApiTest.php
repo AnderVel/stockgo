@@ -162,6 +162,9 @@ class StockGoApiTest extends TestCase
 
         $p->refresh();
         $this->assertSame(95, $p->stock_fisico);
+
+        $mov = Movimiento::latest('id_movimiento')->first();
+        $this->assertNotNull($mov->usuario_id);
     }
 
     public function test_proveedor_con_movimientos_no_se_puede_eliminar(): void

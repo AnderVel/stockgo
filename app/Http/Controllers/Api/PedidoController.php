@@ -580,6 +580,7 @@ class PedidoController extends Controller
 
                     'stock_nuevo' =>
                         $producto->stock_fisico,
+                    'usuario_id' => auth()->id(),
                 ]);
             }
 
