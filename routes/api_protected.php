@@ -15,11 +15,6 @@ Route::get(
     [AuthController::class, 'me']
 );
 
-Route::post(
-    '/auth/logout',
-    [AuthController::class, 'logout']
-);
-
 Route::get(
     '/productos',
     [ProductoController::class, 'index']
@@ -120,6 +115,11 @@ Route::post(
 Route::post(
     '/inventario/movimiento',
     [MovimientoController::class, 'movimiento']
+)->middleware('permission:inventory.picking');
+
+Route::post(
+    '/productos/{producto}/movimiento',
+    [MovimientoController::class, 'movimientoProducto']
 )->middleware('permission:inventory.picking');
 
 Route::get(

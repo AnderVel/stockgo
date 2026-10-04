@@ -1,15 +1,9 @@
 const BASE = '/api/web'
 
-let accessToken: string | null = localStorage.getItem('sg_token')
-let refreshToken: string | null = localStorage.getItem('sg_refresh')
+let accessToken: string | null = null
 
-export function setTokens(token: string | null, refresh: string | null) {
+export function setTokens(token: string | null) {
   accessToken = token
-  refreshToken = refresh
-  if (token) localStorage.setItem('sg_token', token)
-  else localStorage.removeItem('sg_token')
-  if (refresh) localStorage.setItem('sg_refresh', refresh)
-  else localStorage.removeItem('sg_refresh')
 }
 
 export function getToken() {
@@ -17,24 +11,21 @@ export function getToken() {
 }
 
 async function tryRefresh(): Promise<boolean> {
-  if (!refreshToken) return false
   const res = await fetch(`${BASE}/auth/refresh`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ refresh_token: refreshToken }),
   })
-  if (!res.ok) {
-    setTokens(null, null)
-    return false
-  }
+  if (!res.ok) return false
   const data = await res.json()
-  setTokens(data.token, data.refresh_token)
+  setTokens(data.token)
   return true
 }
 
 export async function api<T = any>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
@@ -63,10 +54,12 @@ export const authService = {
   login: (usuario: string, password: string, code: string) =>
     fetch(`${BASE}/auth/login`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ usuario, password, code }),
     }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json() })),
+  refresh: () => tryRefresh(),
   logout: () =>
-    api('/auth/logout', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) }).catch(() => {}),
+    fetch(`${BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {}),
   me: () => api('/auth/me'),
 }

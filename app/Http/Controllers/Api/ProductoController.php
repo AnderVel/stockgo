@@ -134,12 +134,29 @@ class ProductoController extends Controller
             'precio' =>
                 'required|numeric|min:0',
 
+            'stock_fisico' =>
+                'required|integer|min:0',
+
+            'stock_reservado' =>
+                'required|integer|min:0',
+
             'estado' =>
                 'required|string|max:50',
 
             'ubicacion' =>
                 'nullable|string|max:255',
         ]);
+
+        $datos['stock_disponible'] =
+            $datos['stock_fisico'] -
+            $datos['stock_reservado'];
+
+        if ($datos['stock_disponible'] < 0) {
+            return response()->json([
+                'mensaje' =>
+                    'El stock reservado no puede ser mayor al stock físico.'
+            ], 422);
+        }
 
         $producto->update($datos);
 

@@ -9,6 +9,9 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
+  const [showForgot, setShowForgot] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotMessage, setForgotMessage] = useState('')
 
   if (user) return <Navigate to="/" replace />
 
@@ -17,6 +20,17 @@ export default function Login() {
     const res = await login(usuario, password, code)
     if (res.ok) nav('/')
     else setError(res.message || 'Error')
+  }
+
+  const submitForgot = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const res = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: forgotEmail }),
+    })
+    const data = await res.json()
+    setForgotMessage(data.message || 'Revisa tu correo')
   }
 
   return (
@@ -29,6 +43,17 @@ export default function Login() {
         {error && <p className="error">{error}</p>}
         <button type="submit">Entrar</button>
       </form>
+      <div style={{ marginTop: '1rem' }}>
+        <a style={{ color: '#4b5563', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setShowForgot(!showForgot)}>¿Olvidaste tu contraseña?</a>
+      </div>
+      {showForgot && (
+        <form onSubmit={submitForgot} style={{ marginTop: '1rem' }}>
+          <p>Ingresa el correo con el que se registró el usuario</p>
+          <input style={{ width: '100%', padding: '0.5rem', marginBottom: '0.5rem' }} type="email" placeholder="Correo" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} required />
+          <button type="submit">Enviar token</button>
+          {forgotMessage && <p style={{ marginTop: '0.5rem' }}>{forgotMessage}</p>}
+        </form>
+      )}
     </div>
   )
 }

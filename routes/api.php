@@ -7,11 +7,24 @@ use Illuminate\Support\Facades\Route;
 Route::post('/auth/login', [AuthController::class, 'login'])
     ->middleware('throttle:30,1');
 
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])
+    ->middleware('throttle:30,1');
+
+Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])
+    ->middleware('throttle:30,1');
+
 Route::post('/web/auth/login', [WebAuthController::class, 'login'])
     ->middleware('throttle:30,1');
 
 Route::post('/web/auth/refresh', [WebAuthController::class, 'refresh'])
     ->middleware('throttle:30,1');
+
+Route::post('/web/auth/logout', [WebAuthController::class, 'logout']);
+
+Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware([
+    'auth:sanctum',
+    'abilities:api-access',
+]);
 
 Route::middleware([
     'auth:sanctum',

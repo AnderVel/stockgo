@@ -62,20 +62,36 @@ class WebAuthTest extends TestCase
             'code' => $code,
         ]);
 
-        $response->assertOk()->assertJsonStructure(['token', 'refresh_token', 'expires_in']);
+        $response->assertOk()->assertJsonStructure(['token', 'expires_in']);
+        $response->assertCookie('stockgo_refresh');
+        $this->assertFalse($response->headers->has('refresh_token'));
+        $this->assertArrayNotHasKey('refresh_token', $response->json());
 
         $token = $response->json('token');
 
         $this->getJson('/api/web/auth/me', ['Authorization' => "Bearer $token"])
             ->assertOk()->assertJsonPath('user.username', 'admin');
 
-        $refresh = $response->json('refresh_token');
+        $refreshCookie = $response->headers->getCookies()[0];
+        $this->assertTrue($refreshCookie->isHttpOnly());
 
-        $this->postJson('/api/web/auth/refresh', ['refresh_token' => $refresh])
-            ->assertOk()->assertJsonStructure(['token', 'refresh_token']);
+        $refreshResponse = $this->call(
+            'POST', '/api/web/auth/refresh', [],
+            ['stockgo_refresh' => $refreshCookie->getValue()],
+            [],
+            ['HTTP_ACCEPT' => 'application/json', 'CONTENT_TYPE' => 'application/json']
+        );
 
-        $this->postJson('/api/web/auth/refresh', ['refresh_token' => $refresh])
-            ->assertStatus(401);
+        $refreshResponse->assertOk()->assertJsonStructure(['token', 'expires_in']);
+        $this->assertArrayNotHasKey('refresh_token', $refreshResponse->json());
+
+        // Reutilizar el mismo refresh token (ya rotado) debe fallar
+        $this->call(
+            'POST', '/api/web/auth/refresh', [],
+            ['stockgo_refresh' => $refreshCookie->getValue()],
+            [],
+            ['HTTP_ACCEPT' => 'application/json', 'CONTENT_TYPE' => 'application/json']
+        )->assertStatus(401);
     }
 
     public function test_ruta_web_rechaza_sin_token(): void

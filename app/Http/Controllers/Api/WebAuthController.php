@@ -15,6 +15,8 @@ use PragmaRX\Google2FA\Google2FA;
 
 class WebAuthController extends Controller
 {
+    private const COOKIE = 'stockgo_refresh';
+
     public function login(Request $request)
     {
         $datos = $request->validate([
@@ -61,13 +63,11 @@ class WebAuthController extends Controller
         }
 
         $google2fa = new Google2FA();
-        $timestamp = $google2fa->verifyKeyNewer(
-            $user->two_factor_secret,
-            $datos['code'],
-            $user->two_factor_last_timestamp ?? 0
-        );
-
-        if ($timestamp === false) {
+        // Web usa verifyKey (no verifyKeyNewer) para no compartir two_factor_last_timestamp
+        // con Android: ambos clientes pueden consumir el mismo TOTP con códigos distintos
+        // dentro de la misma ventana de 30s sin bloquearse entre sí.
+        // El replay dentro de la ventana se mitiga con rate limiting + rotación de refresh.
+        if (!$google2fa->verifyKey($user->two_factor_secret, $datos['code'])) {
             RateLimiter::hit($key, 60);
 
             return response()->json([
@@ -77,7 +77,6 @@ class WebAuthController extends Controller
         }
 
         RateLimiter::clear($key);
-        $user->forceFill(['two_factor_last_timestamp' => $timestamp])->save();
 
         app(AuditoriaService::class)->registrar('LOGIN_WEB', 'AUTH', 'Inicio de sesión web.', [], $request);
 
@@ -86,21 +85,54 @@ class WebAuthController extends Controller
 
     public function refresh(Request $request)
     {
-        $datos = $request->validate(['refresh_token' => ['required', 'string']]);
+        $refresh = $request->cookie(self::COOKIE);
 
-        $hash = hash('sha256', $datos['refresh_token']);
-        $token = WebRefreshToken::where('token_hash', $hash)->first();
+        if (!$refresh) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No hay refresh token.',
+            ], 401);
+        }
 
-        if (!$token || !$token->esValido()) {
+        $token = \Illuminate\Support\Facades\DB::transaction(function () use ($refresh) {
+            $t = WebRefreshToken::where('token_hash', hash('sha256', $refresh))
+                ->lockForUpdate()
+                ->first();
+
+            if (!$t || !$t->esValido()) {
+                return null;
+            }
+
+            $t->update(['revoked_at' => now()]);
+
+            return $t;
+        });
+
+        if (!$token) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Refresh token inválido o expirado.',
             ], 401);
         }
 
-        $token->update(['revoked_at' => now()]);
-
         return $this->emitirSesion($token->user);
+    }
+
+    public function logout(Request $request)
+    {
+        $refresh = $request->cookie(self::COOKIE);
+
+        if ($refresh) {
+            WebRefreshToken::where('token_hash', hash('sha256', $refresh))
+                ->update(['revoked_at' => now()]);
+        }
+
+        app(AuditoriaService::class)->registrar('LOGOUT_WEB', 'AUTH', 'Sesión web cerrada.', [], $request);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Sesión cerrada correctamente.',
+        ])->withCookie($this->cookie(''))->withoutCookie(self::COOKIE);
     }
 
     private function emitirSesion(User $user)
@@ -119,7 +151,6 @@ class WebAuthController extends Controller
             'token' => $access,
             'token_type' => 'Bearer',
             'expires_in' => ((int) config('jwt.ttl_minutes', 30)) * 60,
-            'refresh_token' => $refresh,
             'user' => [
                 'id' => $user->id,
                 'username' => $user->username,
@@ -127,6 +158,21 @@ class WebAuthController extends Controller
                 'bodega_asignada' => $user->bodega_asignada,
                 'two_factor_enabled' => (bool) $user->two_factor_enabled,
             ],
-        ]);
+        ])->withCookie($this->cookie($refresh));
+    }
+
+    private function cookie(string $value): \Symfony\Component\HttpFoundation\Cookie
+    {
+        return cookie(
+            self::COOKIE,
+            $value,
+            (int) config('jwt.refresh_ttl_days', 7) * 24 * 60,
+            '/',
+            null,
+            (bool) app()->isProduction(),
+            true,   // HttpOnly
+            false,
+            'lax'   // SameSite
+        );
     }
 }

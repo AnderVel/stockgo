@@ -215,6 +215,42 @@ class StockGoApiTest extends TestCase
         $this->postJson("/api/pedidos/$pedidoId/recibir")->assertOk();
     }
 
+    public function test_producto_movimiento_entrada_persistente() : void
+    {
+        Sanctum::actingAs($this->admin(), ['api-access']);
+        $p = $this->producto(['stock_fisico' => 50, 'stock_disponible' => 50]);
+
+        $ok = $this->postJson('/api/productos/'.$p->id_producto.'/movimiento', [
+            'tipo' => 'entrada',
+            'cantidad' => 10,
+            'pedido_id' => null,
+        ]);
+
+        $ok->assertOk()->assertJsonPath('status', 'success');
+        $p->refresh();
+        $this->assertSame(60, $p->stock_fisico);
+        $this->assertSame(60, $p->stock_disponible);
+
+        $mov = Movimiento::where('id_producto', $p->id_producto)->latest('id_movimiento')->first();
+        $this->assertNotNull($mov);
+        $this->assertSame('ENTRADA', $mov->tipo);
+        $this->assertSame(auth()->id(), $mov->usuario_id ?? auth()->id());
+    }
+
+    public function test_producto_movimiento_salida_insuficiente_sin_restar() : void
+    {
+        Sanctum::actingAs($this->admin(), ['api-access']);
+        $p = $this->producto(['stock_fisico' => 5, 'stock_disponible' => 5]);
+
+        $this->postJson('/api/productos/'.$p->id_producto.'/movimiento', [
+            'tipo' => 'salida',
+            'cantidad' => 10,
+        ])->assertStatus(422);
+
+        $p->refresh();
+        $this->assertSame(5, $p->stock_fisico);
+    }
+
     public function test_cancelar_pedido_libera_reserva(): void
     {
         Sanctum::actingAs($this->admin(), ['api-access']);

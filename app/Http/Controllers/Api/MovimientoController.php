@@ -249,97 +249,12 @@ class MovimientoController extends Controller
             'usuario_id' => 'nullable|integer|min:1',
         ]);
 
-        $resultado = DB::transaction(function () use ($datos) {
-            $producto = Producto::where(
-                'codigo_barras',
-                $datos['codigo_barras']
-            )
-            ->lockForUpdate()
-            ->first();
-
-            if (!$producto) {
-                return [
-                    'error' => true,
-                    'mensaje' => 'Código de producto no registrado.'
-                ];
-            }
-
-            $stockDisponible =
-                $producto->stock_fisico -
-                $producto->stock_reservado;
-
-            if (
-                $datos['tipo_movimiento'] === 'recepcion'
-            ) {
-                $stockAnterior = $producto->stock_fisico;
-
-                $producto->stock_fisico +=
-                    $datos['cantidad'];
-
-                $producto->stock_disponible =
-                    $producto->stock_fisico -
-                    $producto->stock_reservado;
-
-                $producto->save();
-
-                Movimiento::create([
-                    'id_producto' => $producto->id_producto,
-                    'tipo' => 'ENTRADA',
-                    'cantidad' => $datos['cantidad'],
-                    'motivo' => 'Recepción de mercancía',
-                    'stock_anterior' => $stockAnterior,
-                    'stock_nuevo' => $producto->stock_fisico,
-                'usuario_id' => auth()->id(),
-                ]);
-
-                return [
-                    'error' => false
-                ];
-            }
-
-            if (
-                $datos['cantidad'] >
-                $stockDisponible
-            ) {
-                return [
-                    'error' => true,
-                    'mensaje' =>
-                        'La cantidad solicitada excede el stock disponible.'
-                ];
-            }
-
-            $stockAnterior = $producto->stock_fisico;
-
-            $producto->stock_fisico -=
-                $datos['cantidad'];
-
-            $producto->stock_reservado =
-                max(
-                    0,
-                    $producto->stock_reservado -
-                    $datos['cantidad']
-                );
-
-            $producto->stock_disponible =
-                $producto->stock_fisico -
-                $producto->stock_reservado;
-
-            $producto->save();
-
-            Movimiento::create([
-                'id_producto' => $producto->id_producto,
-                'tipo' => 'SALIDA',
-                'cantidad' => $datos['cantidad'],
-                'motivo' => 'Picking desde Android',
-                'stock_anterior' => $stockAnterior,
-                'stock_nuevo' => $producto->stock_fisico,
-                'usuario_id' => auth()->id(),
-            ]);
-
-            return [
-                'error' => false
-            ];
-        });
+        $resultado = $this->ejecutarMovimiento(
+            $datos['codigo_barras'],
+            $datos['tipo_movimiento'],
+            $datos['cantidad'],
+            null
+        );
 
         if ($resultado['error']) {
             return response()->json([
@@ -364,5 +279,142 @@ class MovimientoController extends Controller
             'status' => 'success',
             'message' => 'Movimiento registrado'
         ], 200);
+    }
+
+    /**
+     * Endpoint compatible con el contrato solicitado por Android:
+     * POST /api/productos/{id}/movimiento
+     * { "tipo": "entrada"|"salida", "cantidad": int, "pedido_id": int|null }
+     */
+    public function movimientoProducto(Request $request, Producto $producto)
+    {
+        $datos = $request->validate([
+            'tipo' => 'required|in:entrada,salida',
+            'cantidad' => 'required|integer|min:1',
+            'pedido_id' => 'nullable|integer|exists:pedidos,id_pedido',
+        ]);
+
+        $tipoMovimiento = $datos['tipo'] === 'entrada' ? 'recepcion' : 'picking';
+
+        $resultado = $this->ejecutarMovimiento(
+            $producto->codigo_barras,
+            $tipoMovimiento,
+            $datos['cantidad'],
+            $datos['pedido_id'] ?? null
+        );
+
+        if ($resultado['error']) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $resultado['mensaje']
+            ], 422);
+        }
+
+        app(AuditoriaService::class)->registrar(
+            'CREAR',
+            'INVENTARIO',
+            'Movimiento registrado desde Android.',
+            [
+                'id_producto' => $producto->id_producto,
+                'tipo' => $datos['tipo'],
+                'cantidad' => $datos['cantidad'],
+                'pedido_id' => $datos['pedido_id'] ?? null,
+            ],
+            $request
+        );
+
+        $producto->refresh();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Movimiento registrado',
+            'producto' => [
+                'id_producto' => $producto->id_producto,
+                'stock_fisico' => $producto->stock_fisico,
+                'stock_reservado' => $producto->stock_reservado,
+                'stock_disponible' => $producto->stock_disponible,
+            ],
+        ], 200);
+    }
+
+    private function ejecutarMovimiento(string $codigoBarras, string $tipoMovimiento, int $cantidad, ?int $idPedido)
+    {
+        return DB::transaction(function () use ($codigoBarras, $tipoMovimiento, $cantidad, $idPedido) {
+            $producto = Producto::where(
+                'codigo_barras',
+                $codigoBarras
+            )
+            ->lockForUpdate()
+            ->first();
+
+            if (!$producto) {
+                return [
+                    'error' => true,
+                    'mensaje' => 'Código de producto no registrado.'
+                ];
+            }
+
+            $stockDisponible =
+                $producto->stock_fisico -
+                $producto->stock_reservado;
+
+            if ($tipoMovimiento === 'recepcion') {
+                $stockAnterior = $producto->stock_fisico;
+
+                $producto->stock_fisico += $cantidad;
+
+                $producto->stock_disponible =
+                    $producto->stock_fisico -
+                    $producto->stock_reservado;
+
+                $producto->save();
+
+                Movimiento::create([
+                    'id_producto' => $producto->id_producto,
+                    'tipo' => 'ENTRADA',
+                    'cantidad' => $cantidad,
+                    'motivo' => 'Recepción de mercancía',
+                    'id_pedido' => $idPedido,
+                    'stock_anterior' => $stockAnterior,
+                    'stock_nuevo' => $producto->stock_fisico,
+                    'usuario_id' => auth()->id(),
+                ]);
+
+                return ['error' => false];
+            }
+
+            if ($cantidad > $stockDisponible) {
+                return [
+                    'error' => true,
+                    'mensaje' =>
+                        'La cantidad solicitada excede el stock disponible.'
+                ];
+            }
+
+            $stockAnterior = $producto->stock_fisico;
+
+            $producto->stock_fisico -= $cantidad;
+
+            $producto->stock_reservado = max(0, $producto->stock_reservado - $cantidad);
+
+            $producto->stock_disponible =
+                $producto->stock_fisico -
+                $producto->stock_reservado;
+
+            $producto->save();
+
+            Movimiento::create([
+                'id_producto' => $producto->id_producto,
+                'tipo' => 'SALIDA',
+                'cantidad' => $cantidad,
+                'motivo' => 'Picking desde Android',
+                'id_pedido' => $idPedido,
+                'stock_anterior' => $stockAnterior,
+                'stock_nuevo' => $producto->stock_fisico,
+                'usuario_id' => auth()->id(),
+            ]);
+
+            return ['error' => false];
+        });
     }
 }

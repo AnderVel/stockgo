@@ -34,3 +34,6 @@ AGENTS.md
 # Web Admin
 /web-admin/node_modules
 /web-admin/dist
+
+# Artefactos TS
+*.tsbuildinfo

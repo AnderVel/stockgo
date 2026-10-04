@@ -15,26 +15,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (getToken()) {
-      authService
-        .me()
-        .then((r: any) => setUser(r.user))
-        .catch(() => setTokens(null, null))
-        .finally(() => setLoading(false))
-    } else setLoading(false)
+    authService
+      .refresh()
+      .then(async (ok) => {
+        if (ok) {
+          const r: any = await authService.me()
+          setUser(r.user)
+        }
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   const login = async (usuario: string, password: string, code: string) => {
     const res = await authService.login(usuario, password, code)
     if (!res.ok) return { ok: false, message: res.body?.message }
-    setTokens(res.body.token, res.body.refresh_token)
+    setTokens(res.body.token)
     setUser(res.body.user)
     return { ok: true }
   }
 
   const logout = () => {
     authService.logout()
-    setTokens(null, null)
+    setTokens(null)
     setUser(null)
   }
 

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use PragmaRX\Google2FA\Google2FA;
+use Illuminate\Support\Facades\Password;
 
 class AuthController extends Controller
 {
@@ -276,6 +277,67 @@ class AuthController extends Controller
             'expires_in' => 28800,
             'user' => $this->userData($user),
         ]);
+    }
+
+    public function forgotPassword(Request $request)
+    {
+        $datos = $request->validate([
+            'email' => ['required', 'email'],
+        ]);
+
+        // Siempre respuesta genérica, sin revelar si el usuario existe.
+        Password::sendResetLink($datos);
+
+        app(AuditoriaService::class)->registrar(
+            'SOLICITUD_RESTABLECIMIENTO',
+            'AUTH',
+            'Solicitud de restablecimiento de contraseña.',
+            [],
+            $request
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Si existe una cuenta con ese correo, se enviará un enlace de restablecimiento.',
+        ]);
+    }
+
+    public function resetPassword(Request $request)
+    {
+        $datos = $request->validate([
+            'email' => ['required', 'email'],
+            'token' => ['required', 'string'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $status = Password::reset(
+            $datos,
+            function ($user, $password) {
+                $user->forceFill([
+                    'password' => Hash::make($password),
+                ])->save();
+            }
+        );
+
+        if ($status === Password::PASSWORD_RESET) {
+            app(AuditoriaService::class)->registrar(
+                'RESTABLECER_CONTRASENA',
+                'AUTH',
+                'Contraseña restablecida correctamente.',
+                [],
+                $request
+            );
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Contraseña restablecida correctamente.',
+            ]);
+        }
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'No se pudo restablecer la contraseña.',
+        ], 422);
     }
 
     public function me(Request $request)
