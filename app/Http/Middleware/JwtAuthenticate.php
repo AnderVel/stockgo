@@ -14,7 +14,7 @@ class JwtAuthenticate
     {
         $header = $request->header('Authorization', '');
 
-        if (!str_starts_with($header, 'Bearer ')) {
+        if (! str_starts_with($header, 'Bearer ')) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'No autenticado.',
@@ -32,11 +32,18 @@ class JwtAuthenticate
 
         $user = User::find($payload['sub'] ?? null);
 
-        if (!$user) {
+        if (! $user) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'No autenticado.',
             ], 401);
+        }
+
+        if ($user->activo === false) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La cuenta está inactiva.',
+            ], 403);
         }
 
         auth()->setUser($user);

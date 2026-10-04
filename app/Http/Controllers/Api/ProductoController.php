@@ -10,78 +10,86 @@ use Illuminate\Validation\Rule;
 
 class ProductoController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Producto::orderBy('id_producto')->get()
-        );
+        $query = Producto::query()->orderBy('id_producto');
+
+        if ($request->filled('search')) {
+            $search = $request->query('search');
+            $query->where(function ($builder) use ($search): void {
+                $term = '%'.mb_strtolower($search).'%';
+                $builder->whereRaw('LOWER(nombre) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(codigo_barras) LIKE ?', [$term]);
+            });
+        }
+
+        if ($request->boolean('paginate')) {
+            $perPage = min(max($request->integer('per_page', 25), 1), 50);
+
+            return response()->json($query->paginate($perPage));
+        }
+
+        return response()->json($query->get());
     }
 
-   public function buscarPorCodigo($codigo)
-{
-    $producto = Producto::where(
-        'codigo_barras',
-        $codigo
-    )->first();
+    public function buscarPorCodigo($codigo)
+    {
+        $producto = Producto::where(
+            'codigo_barras',
+            $codigo
+        )->first();
 
-    if (!$producto) {
+        if (! $producto) {
+            return response()->json([
+                'mensaje' => 'Producto no encontrado.',
+            ], 404);
+        }
+
+        $stockDisponible =
+            $producto->stock_fisico -
+            $producto->stock_reservado;
+
         return response()->json([
-            'mensaje' => 'Producto no encontrado.'
-        ], 404);
+            'codigo_barras' => $producto->codigo_barras,
+            'nombre' => $producto->nombre,
+            'precio' => (float) $producto->precio,
+            'unidad_medida' => $producto->unidad_medida,
+            'stock_fisico' => $producto->stock_fisico,
+            'stock_disponible' => $stockDisponible,
+            'ubicacion' => $producto->ubicacion,
+            'estado' => $producto->estado,
+        ]);
     }
-
-    $stockDisponible =
-        $producto->stock_fisico -
-        $producto->stock_reservado;
-
-    return response()->json([
-        'codigo_barras' => $producto->codigo_barras,
-        'nombre' => $producto->nombre,
-        'precio' => (float) $producto->precio,
-        'unidad_medida' => $producto->unidad_medida,
-        'stock_fisico' => $producto->stock_fisico,
-        'stock_disponible' => $stockDisponible,
-        'ubicacion' => $producto->ubicacion,
-        'estado' => $producto->estado,
-    ]);
-}
 
     public function store(Request $request)
     {
         $datos = $request->validate([
-            'codigo_barras' =>
-                'required|string|unique:productos,codigo_barras',
+            'codigo_barras' => 'required|string|unique:productos,codigo_barras',
 
-            'nombre' =>
-                'required|string|max:255',
+            'nombre' => 'required|string|max:255',
 
-            'unidad_medida' =>
-                'required|string|max:100',
+            'unidad_medida' => 'required|string|max:100',
 
-            'precio' =>
-                'required|numeric|min:0',
+            'precio' => 'required|numeric|min:0',
 
-            'stock_fisico' =>
-                'required|integer|min:0',
+            'stock_fisico' => 'sometimes|integer|min:0',
 
-            'stock_reservado' =>
-                'required|integer|min:0',
+            'stock_reservado' => 'sometimes|integer|min:0',
 
-            'estado' =>
-                'required|string|max:50',
+            'estado' => 'required|string|max:50',
 
-            'ubicacion' =>
-                'nullable|string|max:255',
+            'ubicacion' => 'nullable|string|max:255',
         ]);
 
-        $datos['stock_disponible'] =
-            $datos['stock_fisico'] -
-            $datos['stock_reservado'];
+        $stockFisico = (int) ($datos['stock_fisico'] ?? 0);
+        $stockReservado = (int) ($datos['stock_reservado'] ?? 0);
+        $datos['stock_fisico'] = $stockFisico;
+        $datos['stock_reservado'] = $stockReservado;
+        $datos['stock_disponible'] = $stockFisico - $stockReservado;
 
         if ($datos['stock_disponible'] < 0) {
             return response()->json([
-                'mensaje' =>
-                    'El stock reservado no puede ser mayor al stock físico.'
+                'mensaje' => 'El stock reservado no puede ser mayor al stock físico.',
             ], 422);
         }
 
@@ -125,38 +133,16 @@ class ProductoController extends Controller
                 ),
             ],
 
-            'nombre' =>
-                'required|string|max:255',
+            'nombre' => 'required|string|max:255',
 
-            'unidad_medida' =>
-                'required|string|max:100',
+            'unidad_medida' => 'required|string|max:100',
 
-            'precio' =>
-                'required|numeric|min:0',
+            'precio' => 'required|numeric|min:0',
 
-            'stock_fisico' =>
-                'required|integer|min:0',
+            'estado' => 'required|string|max:50',
 
-            'stock_reservado' =>
-                'required|integer|min:0',
-
-            'estado' =>
-                'required|string|max:50',
-
-            'ubicacion' =>
-                'nullable|string|max:255',
+            'ubicacion' => 'nullable|string|max:255',
         ]);
-
-        $datos['stock_disponible'] =
-            $datos['stock_fisico'] -
-            $datos['stock_reservado'];
-
-        if ($datos['stock_disponible'] < 0) {
-            return response()->json([
-                'mensaje' =>
-                    'El stock reservado no puede ser mayor al stock físico.'
-            ], 422);
-        }
 
         $producto->update($datos);
 
@@ -173,12 +159,15 @@ class ProductoController extends Controller
 
     public function destroy(Producto $producto)
     {
-        if (
-            $producto->stock_reservado > 0
-        ) {
+        if ($producto->stock_reservado > 0) {
             return response()->json([
-                'mensaje' =>
-                    'No se puede eliminar un producto con stock reservado.'
+                'mensaje' => 'No se puede eliminar un producto con stock reservado.',
+            ], 409);
+        }
+
+        if ($producto->movimientos()->exists() || $producto->detallesPedido()->exists()) {
+            return response()->json([
+                'mensaje' => 'No se puede eliminar un producto con historial de movimientos o pedidos.',
             ], 409);
         }
 
@@ -193,8 +182,7 @@ class ProductoController extends Controller
         );
 
         return response()->json([
-            'mensaje' =>
-                'Producto eliminado correctamente.'
+            'mensaje' => 'Producto eliminado correctamente.',
         ]);
     }
 }

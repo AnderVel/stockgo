@@ -6,15 +6,31 @@ use App\Http\Controllers\Controller;
 use App\Models\Proveedor;
 use App\Services\AuditoriaService;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 class ProveedorController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Proveedor::orderBy('id_proveedor')->get()
-        );
+        $query = Proveedor::query()->orderBy('id_proveedor');
+
+        if ($request->filled('search')) {
+            $search = $request->query('search');
+            $query->where(function ($builder) use ($search): void {
+                $term = '%'.mb_strtolower($search).'%';
+                $builder->whereRaw('LOWER(nombre) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(contacto) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(correo) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(telefono) LIKE ?', [$term]);
+            });
+        }
+
+        if ($request->boolean('paginate')) {
+            $perPage = min(max($request->integer('per_page', 25), 1), 50);
+
+            return response()->json($query->paginate($perPage));
+        }
+
+        return response()->json($query->get());
     }
 
     public function store(Request $request)
@@ -29,6 +45,14 @@ class ProveedorController extends Controller
         ]);
 
         $proveedor = Proveedor::create($datos);
+
+        app(AuditoriaService::class)->registrar(
+            'CREAR',
+            'PROVEEDORES',
+            'Proveedor creado.',
+            ['id_proveedor' => $proveedor->id_proveedor],
+            $request
+        );
 
         return response()->json($proveedor, 201);
     }
@@ -55,6 +79,14 @@ class ProveedorController extends Controller
 
         $proveedor->update($datos);
 
+        app(AuditoriaService::class)->registrar(
+            'ACTUALIZAR',
+            'PROVEEDORES',
+            'Proveedor actualizado.',
+            ['id_proveedor' => $proveedor->id_proveedor],
+            $request
+        );
+
         return response()->json($proveedor);
     }
 
@@ -62,7 +94,7 @@ class ProveedorController extends Controller
     {
         if ($proveedor->movimientos()->exists()) {
             return response()->json([
-                'mensaje' => 'No se puede eliminar un proveedor con movimientos registrados.'
+                'mensaje' => 'No se puede eliminar un proveedor con movimientos registrados.',
             ], 409);
         }
 
@@ -77,7 +109,7 @@ class ProveedorController extends Controller
         );
 
         return response()->json([
-            'mensaje' => 'Proveedor eliminado correctamente.'
+            'mensaje' => 'Proveedor eliminado correctamente.',
         ]);
     }
 }

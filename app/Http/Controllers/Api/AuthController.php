@@ -4,13 +4,14 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\WebRefreshToken;
 use App\Services\AuditoriaService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use PragmaRX\Google2FA\Google2FA;
-use Illuminate\Support\Facades\Password;
 
 class AuthController extends Controller
 {
@@ -23,7 +24,7 @@ class AuthController extends Controller
         ]);
 
         $usuario = Str::lower(trim($datos['usuario']));
-        $key = 'login:' . $usuario . '|' . $request->ip();
+        $key = 'login:'.$usuario.'|'.$request->ip();
 
         if (RateLimiter::tooManyAttempts($key, 5)) {
             return response()->json([
@@ -36,8 +37,8 @@ class AuthController extends Controller
         $user = User::where('username', $usuario)->first();
 
         if (
-            !$user ||
-            !Hash::check($datos['password'], $user->password)
+            ! $user ||
+            ! Hash::check($datos['password'], $user->password)
         ) {
             RateLimiter::hit($key, 60);
 
@@ -55,11 +56,26 @@ class AuthController extends Controller
             ], 401);
         }
 
+        if ($user->activo === false) {
+            app(AuditoriaService::class)->registrar(
+                'LOGIN_ANDROID_RECHAZADO',
+                'AUTH',
+                'Intento de acceso con una cuenta inactiva.',
+                ['usuario' => $usuario],
+                $request
+            );
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La cuenta está inactiva.',
+            ], 403);
+        }
+
         RateLimiter::clear($key);
 
         $deviceName = $datos['device_name'] ?? 'android-stockgo';
 
-        if (!$user->two_factor_enabled) {
+        if (! $user->two_factor_enabled) {
             $token = $user->createToken(
                 'stockgo-2fa-setup',
                 ['2fa-setup'],
@@ -67,7 +83,7 @@ class AuthController extends Controller
             )->plainTextToken;
 
             app(AuditoriaService::class)->registrar(
-                'LOGIN',
+                'LOGIN_ANDROID',
                 'AUTH',
                 'Credenciales válidas; requiere configuración de 2FA.',
                 ['usuario' => $user->username],
@@ -90,7 +106,7 @@ class AuthController extends Controller
         )->plainTextToken;
 
         app(AuditoriaService::class)->registrar(
-            'LOGIN',
+            'LOGIN_ANDROID',
             'AUTH',
             'Credenciales válidas; requiere verificación 2FA.',
             ['usuario' => $user->username],
@@ -117,9 +133,9 @@ class AuthController extends Controller
             ], 409);
         }
 
-        $google2fa = new Google2FA();
+        $google2fa = new Google2FA;
 
-        if (!$user->two_factor_secret) {
+        if (! $user->two_factor_secret) {
             $user->forceFill([
                 'two_factor_secret' => $google2fa->generateSecretKey(),
                 'two_factor_enabled' => false,
@@ -151,14 +167,14 @@ class AuthController extends Controller
 
         $user = $request->user();
 
-        if (!$user->two_factor_secret) {
+        if (! $user->two_factor_secret) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Primero debes iniciar la configuración del segundo factor.',
             ], 422);
         }
 
-        $google2fa = new Google2FA();
+        $google2fa = new Google2FA;
 
         $timestamp = $google2fa->verifyKeyNewer(
             $user->two_factor_secret,
@@ -187,7 +203,7 @@ class AuthController extends Controller
         )->plainTextToken;
 
         app(AuditoriaService::class)->registrar(
-            '2FA_ACTIVADO',
+            '2FA_ANDROID_ACTIVADO',
             'AUTH',
             '2FA activado correctamente.',
             [],
@@ -212,14 +228,14 @@ class AuthController extends Controller
 
         $user = $request->user();
 
-        if (!$user->two_factor_enabled || !$user->two_factor_secret) {
+        if (! $user->two_factor_enabled || ! $user->two_factor_secret) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'La autenticación de dos factores no está configurada.',
             ], 422);
         }
 
-        $key = '2fa:' . $user->id . '|' . $request->ip();
+        $key = '2fa:'.$user->id.'|'.$request->ip();
 
         if (RateLimiter::tooManyAttempts($key, 5)) {
             return response()->json([
@@ -229,7 +245,7 @@ class AuthController extends Controller
             ], 429);
         }
 
-        $google2fa = new Google2FA();
+        $google2fa = new Google2FA;
 
         $timestamp = $google2fa->verifyKeyNewer(
             $user->two_factor_secret,
@@ -257,7 +273,7 @@ class AuthController extends Controller
         $deviceName = $datos['device_name'] ?? 'android-stockgo';
 
         app(AuditoriaService::class)->registrar(
-            '2FA_VERIFICADO',
+            '2FA_ANDROID_VERIFICADO',
             'AUTH',
             'Verificación 2FA exitosa.',
             [],
@@ -342,6 +358,13 @@ class AuthController extends Controller
 
     public function me(Request $request)
     {
+        if ($request->user()->activo === false) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La cuenta está inactiva.',
+            ], 403);
+        }
+
         return response()->json([
             'status' => 'success',
             'user' => $this->userData($request->user()),
@@ -353,14 +376,14 @@ class AuthController extends Controller
         $request->user()->currentAccessToken()?->delete();
 
         if ($request->filled('refresh_token')) {
-            \App\Models\WebRefreshToken::where(
+            WebRefreshToken::where(
                 'token_hash',
                 hash('sha256', $request->input('refresh_token'))
             )->update(['revoked_at' => now()]);
         }
 
         app(AuditoriaService::class)->registrar(
-            'LOGOUT',
+            'LOGOUT_ANDROID',
             'AUTH',
             'Sesión cerrada.',
             [],
@@ -380,6 +403,7 @@ class AuthController extends Controller
             'username' => $user->username,
             'rol' => $user->rol,
             'bodega_asignada' => $user->bodega_asignada,
+            'activo' => (bool) $user->activo,
             'two_factor_enabled' => (bool) $user->two_factor_enabled,
         ];
     }

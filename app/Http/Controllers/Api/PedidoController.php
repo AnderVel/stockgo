@@ -12,16 +12,35 @@ use Illuminate\Support\Facades\DB;
 
 class PedidoController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Pedido::with([
-                'cliente',
-                'detalles.producto',
-            ])
-                ->orderByDesc('id_pedido')
-                ->get()
-        );
+        $query = Pedido::with([
+            'cliente',
+            'detalles.producto',
+        ])->orderByDesc('id_pedido');
+
+        if ($request->filled('estado')) {
+            $query->where('estado', $request->query('estado'));
+        }
+
+        if ($request->filled('search')) {
+            $search = $request->query('search');
+            $query->where(function ($builder) use ($search): void {
+                $term = '%'.mb_strtolower($search).'%';
+                $builder->whereRaw('CAST(id_pedido AS TEXT) LIKE ?', [$term])
+                    ->orWhereHas('cliente', function ($clientQuery) use ($search): void {
+                        $clientQuery->whereRaw('LOWER(nombre) LIKE ?', ['%'.mb_strtolower($search).'%']);
+                    });
+            });
+        }
+
+        if ($request->boolean('paginate')) {
+            $perPage = min(max($request->integer('per_page', 25), 1), 50);
+
+            return response()->json($query->paginate($perPage));
+        }
+
+        return response()->json($query->get());
     }
 
     public function store(Request $request)
@@ -84,9 +103,8 @@ class PedidoController extends Controller
                     return [
                         'error' => true,
                         'status' => 422,
-                        'message' =>
-                            'El producto "' .
-                            $producto->nombre .
+                        'message' => 'El producto "'.
+                            $producto->nombre.
                             '" no está disponible.',
                     ];
                 }
@@ -98,11 +116,10 @@ class PedidoController extends Controller
                     return [
                         'error' => true,
                         'status' => 422,
-                        'message' =>
-                            'Stock disponible insuficiente para "' .
-                            $producto->nombre .
-                            '". Disponible: ' .
-                            $producto->stock_disponible .
+                        'message' => 'Stock disponible insuficiente para "'.
+                            $producto->nombre.
+                            '". Disponible: '.
+                            $producto->stock_disponible.
                             '.',
                     ];
                 }
@@ -115,8 +132,7 @@ class PedidoController extends Controller
                 'fecha_pedido' => $datos['fecha_pedido'],
                 'estado' => 'PENDIENTE',
                 'total' => 0,
-                'observaciones' =>
-                    $datos['observaciones'] ?? null,
+                'observaciones' => $datos['observaciones'] ?? null,
             ]);
 
             $total = 0;
@@ -136,17 +152,13 @@ class PedidoController extends Controller
                     );
 
                 $pedido->detalles()->create([
-                    'id_producto' =>
-                        $producto->id_producto,
+                    'id_producto' => $producto->id_producto,
 
-                    'cantidad' =>
-                        $detalle['cantidad'],
+                    'cantidad' => $detalle['cantidad'],
 
-                    'precio_unitario' =>
-                        $precioUnitario,
+                    'precio_unitario' => $precioUnitario,
 
-                    'subtotal' =>
-                        $subtotal,
+                    'subtotal' => $subtotal,
                 ]);
 
                 $producto->stock_reservado +=
@@ -263,8 +275,7 @@ class PedidoController extends Controller
                 return [
                     'error' => true,
                     'status' => 409,
-                    'message' =>
-                        'Solo se pueden modificar pedidos pendientes.',
+                    'message' => 'Solo se pueden modificar pedidos pendientes.',
                 ];
             }
 
@@ -326,9 +337,8 @@ class PedidoController extends Controller
                     return [
                         'error' => true,
                         'status' => 422,
-                        'message' =>
-                            'El producto "' .
-                            $producto->nombre .
+                        'message' => 'El producto "'.
+                            $producto->nombre.
                             '" no está disponible.',
                     ];
                 }
@@ -341,11 +351,10 @@ class PedidoController extends Controller
                     return [
                         'error' => true,
                         'status' => 422,
-                        'message' =>
-                            'No hay stock suficiente para aumentar "' .
-                            $producto->nombre .
-                            '". Disponible: ' .
-                            $producto->stock_disponible .
+                        'message' => 'No hay stock suficiente para aumentar "'.
+                            $producto->nombre.
+                            '". Disponible: '.
+                            $producto->stock_disponible.
                             '.',
                     ];
                 }
@@ -358,9 +367,8 @@ class PedidoController extends Controller
                     return [
                         'error' => true,
                         'status' => 409,
-                        'message' =>
-                            'La reserva de "' .
-                            $producto->nombre .
+                        'message' => 'La reserva de "'.
+                            $producto->nombre.
                             '" presenta una inconsistencia.',
                     ];
                 }
@@ -413,17 +421,13 @@ class PedidoController extends Controller
                     );
 
                 $pedido->detalles()->create([
-                    'id_producto' =>
-                        $producto->id_producto,
+                    'id_producto' => $producto->id_producto,
 
-                    'cantidad' =>
-                        $detalle['cantidad'],
+                    'cantidad' => $detalle['cantidad'],
 
-                    'precio_unitario' =>
-                        $precioUnitario,
+                    'precio_unitario' => $precioUnitario,
 
-                    'subtotal' =>
-                        $subtotal,
+                    'subtotal' => $subtotal,
                 ]);
 
                 $total += $subtotal;
@@ -433,8 +437,7 @@ class PedidoController extends Controller
                 'id_cliente' => $datos['id_cliente'],
                 'fecha_pedido' => $datos['fecha_pedido'],
                 'total' => $total,
-                'observaciones' =>
-                    $datos['observaciones'] ?? null,
+                'observaciones' => $datos['observaciones'] ?? null,
             ]);
 
             return [
@@ -481,8 +484,7 @@ class PedidoController extends Controller
                 return [
                     'error' => true,
                     'status' => 409,
-                    'message' =>
-                        'El pedido no está pendiente de surtido.',
+                    'message' => 'El pedido no está pendiente de surtido.',
                 ];
             }
 
@@ -518,9 +520,8 @@ class PedidoController extends Controller
                     return [
                         'error' => true,
                         'status' => 409,
-                        'message' =>
-                            'El stock físico ya no permite surtir el producto "' .
-                            $producto->nombre .
+                        'message' => 'El stock físico ya no permite surtir el producto "'.
+                            $producto->nombre.
                             '".',
                     ];
                 }
@@ -532,9 +533,8 @@ class PedidoController extends Controller
                     return [
                         'error' => true,
                         'status' => 409,
-                        'message' =>
-                            'La reserva del producto "' .
-                            $producto->nombre .
+                        'message' => 'La reserva del producto "'.
+                            $producto->nombre.
                             '" presenta una inconsistencia.',
                     ];
                 }
@@ -560,26 +560,20 @@ class PedidoController extends Controller
                 $producto->save();
 
                 Movimiento::create([
-                    'id_producto' =>
-                        $producto->id_producto,
+                    'id_producto' => $producto->id_producto,
 
                     'tipo' => 'SALIDA',
 
-                    'cantidad' =>
-                        $detalle->cantidad,
+                    'cantidad' => $detalle->cantidad,
 
-                    'motivo' =>
-                        'Salida por surtido del pedido #' .
+                    'motivo' => 'Salida por surtido del pedido #'.
                         $pedido->id_pedido,
 
-                    'id_pedido' =>
-                        $pedido->id_pedido,
+                    'id_pedido' => $pedido->id_pedido,
 
-                    'stock_anterior' =>
-                        $stockAnterior,
+                    'stock_anterior' => $stockAnterior,
 
-                    'stock_nuevo' =>
-                        $producto->stock_fisico,
+                    'stock_nuevo' => $producto->stock_fisico,
                     'usuario_id' => auth()->id(),
                 ]);
             }
@@ -615,10 +609,8 @@ class PedidoController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' =>
-                'Pedido surtido correctamente. El inventario fue actualizado.',
-            'pedido' =>
-                $resultado['pedido'],
+            'message' => 'Pedido surtido correctamente. El inventario fue actualizado.',
+            'pedido' => $resultado['pedido'],
         ]);
     }
 
@@ -627,8 +619,7 @@ class PedidoController extends Controller
         if ($pedido->estado !== 'SURTIDO') {
             return response()->json([
                 'status' => 'error',
-                'message' =>
-                    'El pedido debe estar surtido antes de marcarlo como enviado.',
+                'message' => 'El pedido debe estar surtido antes de marcarlo como enviado.',
             ], 409);
         }
 
@@ -646,13 +637,11 @@ class PedidoController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' =>
-                'Pedido marcado como enviado.',
-            'pedido' =>
-                $pedido->load([
-                    'cliente',
-                    'detalles.producto',
-                ]),
+            'message' => 'Pedido marcado como enviado.',
+            'pedido' => $pedido->load([
+                'cliente',
+                'detalles.producto',
+            ]),
         ]);
     }
 
@@ -661,8 +650,7 @@ class PedidoController extends Controller
         if ($pedido->estado !== 'ENVIADO') {
             return response()->json([
                 'status' => 'error',
-                'message' =>
-                    'El pedido debe estar enviado antes de marcarlo como entregado.',
+                'message' => 'El pedido debe estar enviado antes de marcarlo como entregado.',
             ], 409);
         }
 
@@ -680,13 +668,11 @@ class PedidoController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' =>
-                'Pedido entregado correctamente.',
-            'pedido' =>
-                $pedido->load([
-                    'cliente',
-                    'detalles.producto',
-                ]),
+            'message' => 'Pedido entregado correctamente.',
+            'pedido' => $pedido->load([
+                'cliente',
+                'detalles.producto',
+            ]),
         ]);
     }
 
@@ -705,8 +691,7 @@ class PedidoController extends Controller
                 return [
                     'error' => true,
                     'status' => 409,
-                    'message' =>
-                        'Solo se pueden cancelar pedidos pendientes.',
+                    'message' => 'Solo se pueden cancelar pedidos pendientes.',
                 ];
             }
 
@@ -742,9 +727,8 @@ class PedidoController extends Controller
                     return [
                         'error' => true,
                         'status' => 409,
-                        'message' =>
-                            'La reserva del producto "' .
-                            $producto->nombre .
+                        'message' => 'La reserva del producto "'.
+                            $producto->nombre.
                             '" presenta una inconsistencia.',
                     ];
                 }
@@ -789,10 +773,8 @@ class PedidoController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' =>
-                'Pedido cancelado y reserva liberada correctamente.',
-            'pedido' =>
-                $resultado['pedido'],
+            'message' => 'Pedido cancelado y reserva liberada correctamente.',
+            'pedido' => $resultado['pedido'],
         ]);
     }
 
@@ -801,8 +783,7 @@ class PedidoController extends Controller
         if ($pedido->estado !== 'CANCELADO') {
             return response()->json([
                 'status' => 'error',
-                'message' =>
-                    'Primero debes cancelar el pedido.',
+                'message' => 'Primero debes cancelar el pedido.',
             ], 409);
         }
 
@@ -818,8 +799,7 @@ class PedidoController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' =>
-                'Pedido eliminado correctamente.',
+            'message' => 'Pedido eliminado correctamente.',
         ]);
     }
 }

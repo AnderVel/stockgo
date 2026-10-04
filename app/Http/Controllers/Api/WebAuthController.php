@@ -8,10 +8,12 @@ use App\Models\WebRefreshToken;
 use App\Services\AuditoriaService;
 use App\Services\JwtService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use PragmaRX\Google2FA\Google2FA;
+use Symfony\Component\HttpFoundation\Cookie;
 
 class WebAuthController extends Controller
 {
@@ -26,7 +28,7 @@ class WebAuthController extends Controller
         ]);
 
         $usuario = Str::lower(trim($datos['usuario']));
-        $key = 'web-login:' . $usuario . '|' . $request->ip();
+        $key = 'web-login:'.$usuario.'|'.$request->ip();
 
         if (RateLimiter::tooManyAttempts($key, 5)) {
             return response()->json([
@@ -38,8 +40,16 @@ class WebAuthController extends Controller
 
         $user = User::where('username', $usuario)->first();
 
-        if (!$user || !Hash::check($datos['password'], $user->password)) {
+        if (! $user || ! Hash::check($datos['password'], $user->password)) {
             RateLimiter::hit($key, 60);
+
+            app(AuditoriaService::class)->registrar(
+                'LOGIN_WEB_FALLIDO',
+                'AUTH',
+                'Intento de inicio de sesión web fallido.',
+                ['usuario' => $usuario],
+                $request
+            );
 
             return response()->json([
                 'status' => 'error',
@@ -47,7 +57,37 @@ class WebAuthController extends Controller
             ], 401);
         }
 
-        if (!$user->two_factor_enabled || !$user->two_factor_secret) {
+        if ($user->activo === false) {
+            app(AuditoriaService::class)->registrar(
+                'LOGIN_WEB_RECHAZADO',
+                'AUTH',
+                'Intento de acceso web con una cuenta inactiva.',
+                ['usuario' => $usuario],
+                $request
+            );
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La cuenta está inactiva.',
+            ], 403);
+        }
+
+        if ($user->rol !== 'Administrador') {
+            app(AuditoriaService::class)->registrar(
+                'LOGIN_WEB_RECHAZADO',
+                'AUTH',
+                'Intento de acceso web sin rol de Administrador.',
+                ['usuario' => $usuario, 'rol' => $user->rol],
+                $request
+            );
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El rol no tiene acceso al Web Admin.',
+            ], 403);
+        }
+
+        if (! $user->two_factor_enabled || ! $user->two_factor_secret) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Debes configurar 2FA desde la aplicación Android antes de entrar al Web Admin.',
@@ -62,12 +102,12 @@ class WebAuthController extends Controller
             ], 422);
         }
 
-        $google2fa = new Google2FA();
+        $google2fa = new Google2FA;
         // Web usa verifyKey (no verifyKeyNewer) para no compartir two_factor_last_timestamp
         // con Android: ambos clientes pueden consumir el mismo TOTP con códigos distintos
         // dentro de la misma ventana de 30s sin bloquearse entre sí.
         // El replay dentro de la ventana se mitiga con rate limiting + rotación de refresh.
-        if (!$google2fa->verifyKey($user->two_factor_secret, $datos['code'])) {
+        if (! $google2fa->verifyKey($user->two_factor_secret, $datos['code'])) {
             RateLimiter::hit($key, 60);
 
             return response()->json([
@@ -83,23 +123,150 @@ class WebAuthController extends Controller
         return $this->emitirSesion($user);
     }
 
+    public function setupTwoFactor(Request $request)
+    {
+        $datos = $request->validate([
+            'usuario' => ['required', 'string', 'max:100'],
+            'password' => ['required', 'string'],
+        ]);
+
+        $usuario = Str::lower(trim($datos['usuario']));
+        $user = User::where('username', $usuario)->first();
+
+        if (! $user || ! Hash::check($datos['password'], $user->password)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario o contraseña incorrectos.',
+            ], 401);
+        }
+
+        if ($user->activo === false) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La cuenta está inactiva.',
+            ], 403);
+        }
+
+        if ($user->rol !== 'Administrador') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El rol no tiene acceso al Web Admin.',
+            ], 403);
+        }
+
+        if ($user->two_factor_enabled) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La autenticación de dos factores ya está activada.',
+            ], 409);
+        }
+
+        $google2fa = new Google2FA;
+
+        if (! $user->two_factor_secret) {
+            $user->forceFill([
+                'two_factor_secret' => $google2fa->generateSecretKey(),
+                'two_factor_enabled' => false,
+                'two_factor_last_timestamp' => null,
+            ])->save();
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Registra esta cuenta en tu aplicación TOTP y confirma con un código.',
+            'secret' => $user->two_factor_secret,
+            'otpauth_url' => $google2fa->getQRCodeUrl(
+                config('app.name', 'StockGo'),
+                $user->email ?: $user->username,
+                $user->two_factor_secret
+            ),
+        ]);
+    }
+
+    public function confirmTwoFactor(Request $request)
+    {
+        $datos = $request->validate([
+            'usuario' => ['required', 'string', 'max:100'],
+            'password' => ['required', 'string'],
+            'code' => ['required', 'digits:6'],
+        ]);
+
+        $usuario = Str::lower(trim($datos['usuario']));
+        $user = User::where('username', $usuario)->first();
+
+        if (! $user || ! Hash::check($datos['password'], $user->password)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Usuario o contraseña incorrectos.',
+            ], 401);
+        }
+
+        if ($user->activo === false) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La cuenta está inactiva.',
+            ], 403);
+        }
+
+        if ($user->rol !== 'Administrador') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El rol no tiene acceso al Web Admin.',
+            ], 403);
+        }
+
+        if ($user->two_factor_enabled || ! $user->two_factor_secret) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $user->two_factor_enabled
+                    ? 'La autenticación de dos factores ya está activada.'
+                    : 'Primero solicita la configuración del segundo factor.',
+            ], $user->two_factor_enabled ? 409 : 422);
+        }
+
+        if (! (new Google2FA)->verifyKey($user->two_factor_secret, $datos['code'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El código de autenticación no es válido.',
+            ], 422);
+        }
+
+        $user->forceFill([
+            'two_factor_enabled' => true,
+            'two_factor_last_timestamp' => null,
+        ])->save();
+
+        app(AuditoriaService::class)->registrar(
+            '2FA_WEB_ACTIVADO',
+            'AUTH',
+            '2FA Web activado correctamente.',
+            [],
+            $request
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Autenticación de dos factores activada correctamente.',
+        ]);
+    }
+
     public function refresh(Request $request)
     {
         $refresh = $request->cookie(self::COOKIE);
 
-        if (!$refresh) {
+        if (! $refresh) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'No hay refresh token.',
             ], 401);
         }
 
-        $token = \Illuminate\Support\Facades\DB::transaction(function () use ($refresh) {
+        $token = DB::transaction(function () use ($refresh) {
             $t = WebRefreshToken::where('token_hash', hash('sha256', $refresh))
                 ->lockForUpdate()
                 ->first();
 
-            if (!$t || !$t->esValido()) {
+            if (! $t || ! $t->esValido()) {
                 return null;
             }
 
@@ -108,7 +275,7 @@ class WebAuthController extends Controller
             return $t;
         });
 
-        if (!$token) {
+        if (! $token) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Refresh token inválido o expirado.',
@@ -156,12 +323,13 @@ class WebAuthController extends Controller
                 'username' => $user->username,
                 'rol' => $user->rol,
                 'bodega_asignada' => $user->bodega_asignada,
+                'activo' => (bool) $user->activo,
                 'two_factor_enabled' => (bool) $user->two_factor_enabled,
             ],
         ])->withCookie($this->cookie($refresh));
     }
 
-    private function cookie(string $value): \Symfony\Component\HttpFoundation\Cookie
+    private function cookie(string $value): Cookie
     {
         return cookie(
             self::COOKIE,

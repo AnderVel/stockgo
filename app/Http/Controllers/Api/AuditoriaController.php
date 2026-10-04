@@ -29,6 +29,8 @@ class AuditoriaController extends Controller
             $query->whereDate('created_at', '<=', $request->query('hasta'));
         }
 
-        return response()->json($query->paginate(50));
+        $perPage = min(max($request->integer('per_page', 25), 1), 50);
+
+        return response()->json($query->paginate($perPage));
     }
 }

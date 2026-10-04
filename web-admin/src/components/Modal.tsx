@@ -1,23 +1,39 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react'
 
-export default function Modal({ open, title, children, onClose }: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
-  const overlay = useRef<HTMLDivElement>(null);
+type ModalProps = {
+  open: boolean
+  title: string
+  children: React.ReactNode
+  onClose: () => void
+  busy?: boolean
+}
+
+export default function Modal({ open, title, children, onClose, busy = false }: ModalProps) {
+  const overlay = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    const handle = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    if (open) document.addEventListener('keydown', handle);
-    return () => document.removeEventListener('keydown', handle);
-  }, [open, onClose]);
+    const handle = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onClose()
+    }
+    if (open) document.addEventListener('keydown', handle)
+    return () => document.removeEventListener('keydown', handle)
+  }, [busy, onClose, open])
 
-  if (!open) return null;
+  if (!open) return null
   return (
-    <div ref={overlay} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={(e) => e.target === overlay.current && onClose()}>
-      <div className="modal-card" style={{ background: '#fff', padding: '1.5rem', borderRadius: '0.5rem', width: '90%', maxWidth: '500px', boxShadow: '0 10px 25px rgba(0,0,0,.15)' }}>
+    <div
+      ref={overlay}
+      className="modal-backdrop"
+      onClick={(event) => event.target === overlay.current && !busy && onClose()}
+    >
+      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div className="modal-header">
-          <h3>{title}</h3>
-          <button onClick={onClose} style={{ fontSize: '1.2rem', padding: '0.2rem 0.5rem' }}>&times;</button>
+          <h3 id="modal-title">{title}</h3>
+          <button className="icon-button" onClick={onClose} disabled={busy} aria-label="Cerrar">
+            ×
+          </button>
         </div>
         {children}
       </div>
     </div>
-  );
+  )
 }

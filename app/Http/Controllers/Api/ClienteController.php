@@ -9,11 +9,27 @@ use Illuminate\Http\Request;
 
 class ClienteController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Cliente::orderBy('id_cliente')->get()
-        );
+        $query = Cliente::query()->orderBy('id_cliente');
+
+        if ($request->filled('search')) {
+            $search = $request->query('search');
+            $query->where(function ($builder) use ($search): void {
+                $term = '%'.mb_strtolower($search).'%';
+                $builder->whereRaw('LOWER(nombre) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(correo) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(telefono) LIKE ?', [$term]);
+            });
+        }
+
+        if ($request->boolean('paginate')) {
+            $perPage = min(max($request->integer('per_page', 25), 1), 50);
+
+            return response()->json($query->paginate($perPage));
+        }
+
+        return response()->json($query->get());
     }
 
     public function store(Request $request)
@@ -27,6 +43,14 @@ class ClienteController extends Controller
         ]);
 
         $cliente = Cliente::create($datos);
+
+        app(AuditoriaService::class)->registrar(
+            'CREAR',
+            'CLIENTES',
+            'Cliente creado.',
+            ['id_cliente' => $cliente->id_cliente],
+            $request
+        );
 
         return response()->json($cliente, 201);
     }
@@ -50,6 +74,14 @@ class ClienteController extends Controller
 
         $cliente->update($datos);
 
+        app(AuditoriaService::class)->registrar(
+            'ACTUALIZAR',
+            'CLIENTES',
+            'Cliente actualizado.',
+            ['id_cliente' => $cliente->id_cliente],
+            $request
+        );
+
         return response()->json($cliente);
     }
 
@@ -57,7 +89,7 @@ class ClienteController extends Controller
     {
         if ($cliente->pedidos()->exists()) {
             return response()->json([
-                'mensaje' => 'No se puede eliminar un cliente que tiene pedidos.'
+                'mensaje' => 'No se puede eliminar un cliente que tiene pedidos.',
             ], 409);
         }
 
@@ -72,7 +104,7 @@ class ClienteController extends Controller
         );
 
         return response()->json([
-            'mensaje' => 'Cliente eliminado correctamente.'
+            'mensaje' => 'Cliente eliminado correctamente.',
         ]);
     }
 }

@@ -16,12 +16,19 @@ class CheckPermission
     ): Response {
         $user = $request->user();
 
+        if (! $user || $user->activo === false) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La cuenta está inactiva.',
+            ], 403);
+        }
+
         $permisos = config(
-            'permissions.roles.' . ($user?->rol ?? ''),
+            'permissions.roles.'.($user?->rol ?? ''),
             []
         );
 
-        if (!in_array($permission, $permisos, true)) {
+        if (! in_array($permission, $permisos, true)) {
             app(AuditoriaService::class)->registrar(
                 'DENEGADO',
                 $this->modulo($request),
@@ -43,6 +50,10 @@ class CheckPermission
         }
 
         $response = $next($request);
+
+        if ($request->isMethod('GET')) {
+            return $response;
+        }
 
         app(AuditoriaService::class)->registrar(
             'PERMITIDO',

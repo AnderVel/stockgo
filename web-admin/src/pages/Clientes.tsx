@@ -1,66 +1,20 @@
-import { useEffect, useState } from 'react'
-import { clientService } from '../api/services'
-import { DataTable, StatusBadge } from '../components/ui'
+import { useEffect, useMemo, useState } from 'react'
+import { clientService, type PageResponse } from '../api/services'
+import { DataTable, ErrorState, LoadingState, PageHeader, Pagination, StatusBadge } from '../components/ui'
 import Modal from '../components/Modal'
+import { useToast } from '../components/Toast'
 
-const campoStyle = { width: '100%', padding: '0.5rem', marginBottom: '0.5rem', borderRadius: '0.25rem', border: '1px solid #ccc' }
+const blank = { nombre: '', telefono: '', correo: '', direccion: '', estado: 'ACTIVO' }
 
 export default function Clientes() {
-  const [rows, setRows] = useState<any[]>([])
-  const [error, setError] = useState('')
-  const [editing, setEditing] = useState<any | null>(null)
-  const [deleting, setDeleting] = useState<any | null>(null)
-  const [form, setForm] = useState<any>({})
-  const [showForm, setShowForm] = useState(false)
-  const [saving, setSaving] = useState(false)
-
-  const load = () => clientService.list().then(setRows).catch((e) => setError(e.message))
-  useEffect(() => { load() }, [])
-
-  const openAdd = () => { setForm({ nombre: '', telefono: '', correo: '', direccion: '', estado: 'ACTIVO' }); setEditing(null); setShowForm(true) }
-  const openEdit = (c: any) => { setForm({ ...c }); setEditing(c); setShowForm(true) }
-
-  const save = async (e: React.FormEvent) => { e.preventDefault(); setSaving(true); try { if (editing) await clientService.update(editing.id_cliente, form); else await clientService.create(form); setForm({}); setEditing(null); setShowForm(false); await load() } catch (err: any) { setError(err.message) } finally { setSaving(false) } }
-  const confirmDelete = async () => { try { await clientService.remove(deleting.id_cliente); setDeleting(null); await load() } catch (err: any) { setError(err.message); setDeleting(null) } }
-
-  return (
-    <div>
-      <h2>Clientes</h2>
-      <button style={{ marginBottom: '1rem' }} onClick={openAdd}>+ Nuevo cliente</button>
-      {error && <p style={{ color: '#991b1b' }}>{error}</p>}
-      <DataTable
-        rows={rows}
-        columns={[
-          { key: 'id_cliente', label: 'ID' },
-          { key: 'nombre', label: 'Nombre' },
-          { key: 'telefono', label: 'Teléfono' },
-          { key: 'correo', label: 'Correo' },
-          { key: 'direccion', label: 'Dirección' },
-          { key: 'estado', label: 'Estado', render: (r) => <StatusBadge estado={r.estado} /> },
-          { key: 'actions', label: 'Acciones', render: (r) => (<>
-            <button style={{ padding: '0.2rem 0.4rem' }} onClick={() => openEdit(r)}>Editar</button>
-            <button style={{ padding: '0.2rem 0.4rem', background: '#ef4444' }} onClick={() => setDeleting(r)}>Eliminar</button>
-          </>) },
-        ]}
-      />
-      <Modal open={showForm} title={editing ? 'Editar cliente' : 'Nuevo cliente'} onClose={() => { setForm({}); setEditing(null); setShowForm(false) }}>
-        <form onSubmit={save}>
-          <input style={campoStyle} name="nombre" placeholder="Nombre" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} required />
-          <input style={campoStyle} name="telefono" placeholder="Teléfono" value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} />
-          <input style={campoStyle} name="correo" type="email" placeholder="Correo" value={form.correo} onChange={(e) => setForm({ ...form, correo: e.target.value })} />
-          <input style={campoStyle} name="direccion" placeholder="Dirección" value={form.direccion} onChange={(e) => setForm({ ...form, direccion: e.target.value })} />
-          <select style={campoStyle} name="estado" value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })} required>
-            <option value="">Selecciona...</option>
-            <option value="ACTIVO">ACTIVO</option>
-            <option value="INACTIVO">INACTIVO</option>
-          </select>
-          <button type="submit" disabled={saving}>{saving ? 'Guardando...' : editing ? 'Actualizar' : 'Crear'}</button>
-        </form>
-      </Modal>
-      <Modal open={!!deleting} title="Eliminar cliente" onClose={() => setDeleting(null)}>
-        <p>¿Eliminar al cliente <strong>{deleting?.nombre}</strong>?</p>
-        <button onClick={confirmDelete} style={{ background: '#ef4444' }}>Eliminar</button>
-      </Modal>
-    </div>
-  )
+  const [rows, setRows] = useState<any[]>([]); const [query, setQuery] = useState(''); const [page, setPage] = useState(1); const [meta, setMeta] = useState<PageResponse<any> | null>(null); const [form, setForm] = useState<any>(blank); const [editing, setEditing] = useState<any | null>(null); const [deleting, setDeleting] = useState<any | null>(null); const [show, setShow] = useState(false); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [error, setError] = useState<any>(null); const { showToast } = useToast()
+  const load = async (requestedPage = page, search = query) => { setError(null); setLoading(true); try { const response = await clientService.list({ page: requestedPage, search }); setRows(response.data); setMeta(response) } catch (caught) { setError(caught) } finally { setLoading(false) } }
+  useEffect(() => { void load(page, query) }, [page, query])
+  const openEdit = (row: any) => { setForm({ nombre: row.nombre, telefono: row.telefono || '', correo: row.correo || '', direccion: row.direccion || '', estado: row.estado }); setEditing(row); setShow(true) }
+  const save = async (event: React.FormEvent) => { event.preventDefault(); setSaving(true); try { if (editing) { await clientService.update(editing.id_cliente, form); showToast('Cliente actualizado correctamente.', 'success') } else { await clientService.create(form); showToast('Cliente creado correctamente.', 'success') }; setShow(false); setEditing(null); setForm({ ...blank }); await load() } catch (caught: any) { showToast(caught.message, 'error'); setError(caught) } finally { setSaving(false) } }
+  const remove = async () => { if (!deleting) return; try { await clientService.remove(deleting.id_cliente); setDeleting(null); showToast('Cliente eliminado correctamente.', 'success'); await load() } catch (caught: any) { showToast(caught.message, 'error') } }
+  return <div className="page-stack"><PageHeader title="Clientes" description="Consulta y mantiene las cuentas que reciben tus pedidos." action={<button className="button-primary" onClick={() => { setForm({ ...blank }); setEditing(null); setShow(true) }}>Nuevo cliente <span>+</span></button>} /><div className="toolbar"><label className="search-field"><span>⌕</span><input placeholder="Buscar cliente…" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} /></label><span className="result-count">{meta?.total ?? 0} registros</span></div>{error && !loading ? <ErrorState error={error} /> : loading ? <LoadingState text="Cargando clientes…" /> : <><DataTable rows={rows} columns={[{ key: 'nombre', label: 'Cliente', render: (row) => <div className="entity-cell"><span className="entity-avatar client-avatar">{row.nombre?.slice(0, 1)}</span><span><strong>{row.nombre}</strong><small>{row.correo || 'Sin correo'}</small></span></div> }, { key: 'telefono', label: 'Teléfono' }, { key: 'direccion', label: 'Dirección' }, { key: 'estado', label: 'Estado', render: (row) => <StatusBadge estado={row.estado} /> }, { key: 'actions', label: '', render: (row) => <div className="table-actions"><button className="button-quiet" onClick={() => openEdit(row)}>Editar</button><button className="button-danger-quiet" onClick={() => setDeleting(row)}>Eliminar</button></div> }]} />{meta && <Pagination currentPage={meta.current_page} lastPage={meta.last_page} total={meta.total} from={meta.from} to={meta.to} onChange={setPage} />}</>}
+    <Modal open={show} title={editing ? 'Editar cliente' : 'Nuevo cliente'} onClose={() => !saving && setShow(false)} busy={saving}><form className="form-grid" onSubmit={save}><label>Nombre<input value={form.nombre} onChange={(event) => setForm({ ...form, nombre: event.target.value })} required /></label><label>Teléfono<input value={form.telefono} onChange={(event) => setForm({ ...form, telefono: event.target.value })} /></label><label>Correo<input type="email" value={form.correo} onChange={(event) => setForm({ ...form, correo: event.target.value })} /></label><label>Estado<select value={form.estado} onChange={(event) => setForm({ ...form, estado: event.target.value })}><option>ACTIVO</option><option>INACTIVO</option></select></label><label className="form-span">Dirección<input value={form.direccion} onChange={(event) => setForm({ ...form, direccion: event.target.value })} /></label><div className="modal-footer form-span"><button type="button" className="button-secondary" onClick={() => setShow(false)} disabled={saving}>Cancelar</button><button className="button-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar cambios'}</button></div></form></Modal>
+    <Modal open={!!deleting} title="Eliminar cliente" onClose={() => setDeleting(null)}><div className="confirm-copy"><p>¿Eliminar a <strong>{deleting?.nombre}</strong>?</p><small>Los clientes con pedidos asociados no pueden eliminarse.</small></div><div className="modal-footer"><button className="button-secondary" onClick={() => setDeleting(null)}>Cancelar</button><button className="button-danger" onClick={remove}>Eliminar</button></div></Modal>
+  </div>
 }

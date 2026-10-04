@@ -1,49 +1,12 @@
 import { useEffect, useState } from 'react'
-import { orderService } from '../api/services'
-import { DataTable, StatusBadge } from '../components/ui'
+import { orderService, type PageResponse } from '../api/services'
+import { DataTable, ErrorState, formatCurrency, formatDate, LoadingState, PageHeader, Pagination, StatusBadge } from '../components/ui'
+import { useToast } from '../components/Toast'
 
 export default function Pedidos() {
-  const [rows, setRows] = useState<any[]>([])
-  const [estado, setEstado] = useState('')
-  const [error, setError] = useState('')
-
-  const load = () => orderService.list().then(setRows).catch((e) => setError(e.message))
-  useEffect(() => { load() }, [])
-
-  const act = async (fn: () => Promise<any>) => {
-    try { await fn(); await load() } catch (e: any) { setError(e.message) }
-  }
-
-  const filtered = estado ? rows.filter((p) => p.estado === estado) : rows
-
-  return (
-    <div>
-      <h2>Pedidos</h2>
-      <select value={estado} onChange={(e) => setEstado(e.target.value)}>
-        <option value="">Todos</option>
-        {['PENDIENTE', 'SURTIDO', 'ENVIADO', 'ENTREGADO', 'CANCELADO'].map((s) => <option key={s}>{s}</option>)}
-      </select>
-      {error && <p className="error">{error}</p>}
-      <DataTable
-        rows={filtered}
-        columns={[
-          { key: 'id_pedido', label: 'ID' },
-          { key: 'fecha_pedido', label: 'Fecha' },
-          { key: 'estado', label: 'Estado', render: (r) => <StatusBadge estado={r.estado} /> },
-          { key: 'total', label: 'Total' },
-          { key: 'id_cliente', label: 'Cliente' },
-          {
-            key: 'acciones', label: 'Acciones', render: (r) => (
-              <div className="row">
-                {r.estado === 'PENDIENTE' && <button onClick={() => act(() => orderService.surtir(r.id_pedido))}>Surtir</button>}
-                {r.estado === 'PENDIENTE' && <button className="secondary" onClick={() => act(() => orderService.cancel(r.id_pedido))}>Cancelar</button>}
-                {r.estado === 'SURTIDO' && <button onClick={() => act(() => orderService.entregar(r.id_pedido))}>Enviar</button>}
-                {r.estado === 'ENVIADO' && <button onClick={() => act(() => orderService.recibir(r.id_pedido))}>Entregar</button>}
-              </div>
-            ),
-          },
-        ]}
-      />
-    </div>
-  )
+  const [rows, setRows] = useState<any[]>([]); const [estado, setEstado] = useState(''); const [page, setPage] = useState(1); const [meta, setMeta] = useState<PageResponse<any> | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState<any>(null); const [busy, setBusy] = useState<number | null>(null); const { showToast } = useToast()
+  const load = async (requestedPage = page, requestedEstado = estado) => { setError(null); setLoading(true); try { const response = await orderService.list({ page: requestedPage, estado: requestedEstado }); setRows(response.data); setMeta(response) } catch (caught) { setError(caught) } finally { setLoading(false) } }
+  useEffect(() => { void load(page, estado) }, [page, estado])
+  const act = async (id: number, action: () => Promise<any>, message: string) => { setBusy(id); try { await action(); showToast(message, 'success'); await load(page, estado) } catch (caught: any) { showToast(caught.message, 'error') } finally { setBusy(null) } }
+  return <div className="page-stack"><PageHeader title="Pedidos" description="Sigue cada pedido desde la reserva hasta la entrega." /><div className="toolbar"><select className="filter-select" value={estado} onChange={(event) => { setEstado(event.target.value); setPage(1) }}><option value="">Todos los estados</option>{['PENDIENTE', 'SURTIDO', 'ENVIADO', 'ENTREGADO', 'CANCELADO'].map((value) => <option key={value}>{value}</option>)}</select><span className="result-count">{meta?.total ?? 0} pedidos</span></div>{loading ? <LoadingState text="Cargando pedidos…" /> : error ? <ErrorState error={error} /> : <><DataTable rows={rows} columns={[{ key: 'id_pedido', label: 'Pedido', render: (row) => <strong>#{row.id_pedido}</strong> }, { key: 'cliente', label: 'Cliente', render: (row) => row.cliente?.nombre || `#${row.id_cliente}` }, { key: 'fecha_pedido', label: 'Fecha', render: (row) => formatDate(row.fecha_pedido) }, { key: 'total', label: 'Total', render: (row) => formatCurrency(row.total) }, { key: 'estado', label: 'Estado', render: (row) => <StatusBadge estado={row.estado} /> }, { key: 'actions', label: '', render: (row) => <div className="table-actions">{row.estado === 'PENDIENTE' && <><button className="button-quiet" disabled={busy === row.id_pedido} onClick={() => act(row.id_pedido, () => orderService.surtir(row.id_pedido), 'Pedido surtido.')}>Surtir</button><button className="button-danger-quiet" disabled={busy === row.id_pedido} onClick={() => act(row.id_pedido, () => orderService.cancel(row.id_pedido), 'Pedido cancelado.')}>Cancelar</button></>}{row.estado === 'SURTIDO' && <button className="button-quiet" disabled={busy === row.id_pedido} onClick={() => act(row.id_pedido, () => orderService.entregar(row.id_pedido), 'Pedido enviado.')}>Enviar</button>}{row.estado === 'ENVIADO' && <button className="button-quiet" disabled={busy === row.id_pedido} onClick={() => act(row.id_pedido, () => orderService.recibir(row.id_pedido), 'Pedido entregado.')}>Entregar</button>}</div> }]} />{meta && <Pagination currentPage={meta.current_page} lastPage={meta.last_page} total={meta.total} from={meta.from} to={meta.to} onChange={setPage} />}</>}</div>
 }

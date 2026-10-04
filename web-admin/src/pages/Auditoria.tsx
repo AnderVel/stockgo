@@ -1,30 +1,10 @@
 import { useEffect, useState } from 'react'
-import { auditService } from '../api/services'
-import { DataTable } from '../components/ui'
+import { auditService, type PageResponse } from '../api/services'
+import { DataTable, ErrorState, formatDate, LoadingState, PageHeader, Pagination, StatusBadge } from '../components/ui'
 
 export default function Auditoria() {
-  const [rows, setRows] = useState<any[]>([])
-  const [modulo, setModulo] = useState('')
-
-  useEffect(() => {
-    auditService.list(modulo ? `?modulo=${modulo}` : '').then((r: any) => setRows(r.data ?? [])).catch(() => {})
-  }, [modulo])
-
-  return (
-    <div>
-      <h2>Auditoría</h2>
-      <input placeholder="Filtrar por módulo (ej. PRODUCTOS)…" value={modulo} onChange={(e) => setModulo(e.target.value)} />
-      <DataTable
-        rows={rows}
-        columns={[
-          { key: 'id_auditoria', label: 'ID' },
-          { key: 'accion', label: 'Acción' },
-          { key: 'modulo', label: 'Módulo' },
-          { key: 'descripcion', label: 'Descripción' },
-          { key: 'ip_address', label: 'IP' },
-          { key: 'created_at', label: 'Fecha' },
-        ]}
-      />
-    </div>
-  )
+  const [rows, setRows] = useState<any[]>([]); const [modulo, setModulo] = useState(''); const [accion, setAccion] = useState(''); const [page, setPage] = useState(1); const [meta, setMeta] = useState<PageResponse<any> | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState<any>(null)
+  useEffect(() => { setLoading(true); auditService.list({ page, modulo, accion }).then((result) => { setRows(result.data); setMeta(result) }).catch(setError).finally(() => setLoading(false)) }, [accion, modulo, page])
+  const changeFilter = (setter: (value: string) => void, value: string) => { setter(value); setPage(1) }
+  return <div className="page-stack"><PageHeader title="Auditoría" description="Historial persistente de acciones sensibles y accesos relevantes." /><div className="toolbar audit-filters"><input placeholder="Módulo, ej. PRODUCTOS" value={modulo} onChange={(event) => changeFilter(setModulo, event.target.value.toUpperCase())} /><select value={accion} onChange={(event) => changeFilter(setAccion, event.target.value)}><option value="">Todas las acciones</option><option value="CREAR">Crear</option><option value="ACTUALIZAR">Actualizar</option><option value="ELIMINAR">Eliminar</option><option value="LOGIN_WEB">Login Web</option><option value="LOGIN_WEB_FALLIDO">Login Web fallido</option><option value="LOGIN_ANDROID">Login Android</option><option value="2FA_WEB_ACTIVADO">2FA Web activado</option><option value="DENEGADO">Denegado</option></select></div>{loading ? <LoadingState text="Cargando auditoría…" /> : error ? <ErrorState error={error} /> : <><DataTable rows={rows} columns={[{ key: 'accion', label: 'Acción', render: (row) => <StatusBadge estado={row.accion} /> }, { key: 'modulo', label: 'Módulo' }, { key: 'descripcion', label: 'Descripción' }, { key: 'usuario', label: 'Usuario', render: (row) => row.usuario?.username || 'Sistema' }, { key: 'ip_address', label: 'IP' }, { key: 'created_at', label: 'Fecha', render: (row) => formatDate(row.created_at) }]} />{meta && <Pagination currentPage={meta.current_page} lastPage={meta.last_page} total={meta.total} from={meta.from} to={meta.to} onChange={setPage} />}</>}</div>
 }

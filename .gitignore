@@ -37,3 +37,10 @@ AGENTS.md
 
 # Artefactos TS
 *.tsbuildinfo
+
+# Agentes/skills locales
+.agents/
+
+# Configuración local de IA
+CLAUDE.md
+skills-lock.json

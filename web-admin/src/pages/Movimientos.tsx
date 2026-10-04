@@ -1,36 +1,17 @@
 import { useEffect, useState } from 'react'
-import { inventoryService } from '../api/services'
-import { DataTable, StatusBadge } from '../components/ui'
+import { inventoryService, type PageResponse } from '../api/services'
+import { DataTable, ErrorState, formatDate, LoadingState, PageHeader, Pagination, StatusBadge } from '../components/ui'
+import Modal from '../components/Modal'
+import { useToast } from '../components/Toast'
+
+type MovementType = 'entrada' | 'salida' | 'ajuste'
 
 export default function Movimientos() {
-  const [rows, setRows] = useState<any[]>([])
-  const [tipo, setTipo] = useState('')
-
-  useEffect(() => { inventoryService.movements().then(setRows).catch(() => {}) }, [])
-
-  const filtered = tipo ? rows.filter((m) => m.tipo === tipo) : rows
-
-  return (
-    <div>
-      <h2>Movimientos</h2>
-      <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
-        <option value="">Todos</option>
-        <option value="ENTRADA">ENTRADA</option>
-        <option value="SALIDA">SALIDA</option>
-        <option value="AJUSTE">AJUSTE</option>
-      </select>
-      <DataTable
-        rows={filtered}
-        columns={[
-          { key: 'id_movimiento', label: 'ID' },
-          { key: 'tipo', label: 'Tipo', render: (r) => <StatusBadge estado={r.tipo} /> },
-          { key: 'cantidad', label: 'Cantidad' },
-          { key: 'motivo', label: 'Motivo' },
-          { key: 'stock_anterior', label: 'Anterior' },
-          { key: 'stock_nuevo', label: 'Nuevo' },
-          { key: 'created_at', label: 'Fecha' },
-        ]}
-      />
-    </div>
-  )
+  const [rows, setRows] = useState<any[]>([]); const [tipo, setTipo] = useState(''); const [page, setPage] = useState(1); const [meta, setMeta] = useState<PageResponse<any> | null>(null); const [show, setShow] = useState(false); const [movementType, setMovementType] = useState<MovementType>('entrada'); const [form, setForm] = useState({ id_producto: '', cantidad: '', motivo: '' }); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [error, setError] = useState<any>(null); const { showToast } = useToast()
+  const load = async (requestedPage = page, requestedType = tipo) => { setError(null); setLoading(true); try { const response = await inventoryService.movements({ page: requestedPage, tipo: requestedType }); setRows(response.data); setMeta(response) } catch (caught) { setError(caught) } finally { setLoading(false) } }
+  useEffect(() => { void load(page, tipo) }, [page, tipo])
+  const submit = async (event: React.FormEvent) => { event.preventDefault(); setSaving(true); try { const payload = { id_producto: Number(form.id_producto), cantidad: movementType === 'ajuste' ? Number(form.cantidad) : Math.abs(Number(form.cantidad)), motivo: form.motivo || undefined }; if (movementType === 'entrada') await inventoryService.entrada(payload); if (movementType === 'salida') await inventoryService.salida(payload); if (movementType === 'ajuste') await inventoryService.ajuste(payload); setShow(false); setForm({ id_producto: '', cantidad: '', motivo: '' }); showToast('Movimiento registrado correctamente.', 'success'); await load() } catch (caught: any) { showToast(caught.message, 'error') } finally { setSaving(false) } }
+  return <div className="page-stack"><PageHeader title="Movimientos" description="Cada ajuste de stock queda trazado con usuario, motivo y saldo." action={<button className="button-primary" onClick={() => setShow(true)}>Registrar movimiento <span>+</span></button>} /><div className="toolbar"><select className="filter-select" value={tipo} onChange={(event) => { setTipo(event.target.value); setPage(1) }}><option value="">Todos los tipos</option><option value="ENTRADA">Entradas</option><option value="SALIDA">Salidas</option><option value="AJUSTE">Ajustes</option></select><span className="result-count">{meta?.total ?? 0} movimientos</span></div>{loading ? <LoadingState text="Cargando movimientos…" /> : error ? <ErrorState error={error} /> : <><DataTable rows={rows} columns={[{ key: 'tipo', label: 'Tipo', render: (row) => <StatusBadge estado={row.tipo} /> }, { key: 'producto', label: 'Producto', render: (row) => row.producto?.nombre || `#${row.id_producto}` }, { key: 'cantidad', label: 'Cantidad' }, { key: 'motivo', label: 'Motivo' }, { key: 'stock_anterior', label: 'Antes' }, { key: 'stock_nuevo', label: 'Después' }, { key: 'created_at', label: 'Fecha', render: (row) => formatDate(row.created_at) }]} />{meta && <Pagination currentPage={meta.current_page} lastPage={meta.last_page} total={meta.total} from={meta.from} to={meta.to} onChange={setPage} />}</>}
+    <Modal open={show} title="Registrar movimiento" onClose={() => !saving && setShow(false)} busy={saving}><form className="form-grid" onSubmit={submit}><div className="movement-switch form-span"><button type="button" className={movementType === 'entrada' ? 'active' : ''} onClick={() => setMovementType('entrada')}>Entrada</button><button type="button" className={movementType === 'salida' ? 'active' : ''} onClick={() => setMovementType('salida')}>Salida</button><button type="button" className={movementType === 'ajuste' ? 'active' : ''} onClick={() => setMovementType('ajuste')}>Ajuste</button></div><label>Producto (ID)<input type="number" min="1" value={form.id_producto} onChange={(event) => setForm({ ...form, id_producto: event.target.value })} required /></label><label>{movementType === 'ajuste' ? 'Cantidad (+ / −)' : 'Cantidad'}<input type="number" min={movementType === 'ajuste' ? undefined : 1} value={form.cantidad} onChange={(event) => setForm({ ...form, cantidad: event.target.value })} required /></label><label className="form-span">Motivo<input value={form.motivo} onChange={(event) => setForm({ ...form, motivo: event.target.value })} required={movementType === 'ajuste'} /></label><div className="form-note form-span">El servidor valida stock disponible, reservas, transacción y usuario autenticado.</div><div className="modal-footer form-span"><button type="button" className="button-secondary" onClick={() => setShow(false)} disabled={saving}>Cancelar</button><button className="button-primary" disabled={saving}>{saving ? 'Registrando…' : 'Registrar movimiento'}</button></div></form></Modal>
+  </div>
 }

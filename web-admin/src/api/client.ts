@@ -17,7 +17,8 @@ async function tryRefresh(): Promise<boolean> {
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
   })
   if (!res.ok) return false
-  const data = await res.json()
+  const data = await res.json().catch(() => ({}))
+  if (!data.token) return false
   setTokens(data.token)
   return true
 }
@@ -41,13 +42,16 @@ export async function api<T = any>(path: string, options: RequestInit = {}, retr
   const data = await res.json().catch(() => ({}))
 
   if (!res.ok) {
-    const err: any = new Error(data.message || data.mensaje || `Error ${res.status}`)
+    const validation = data.errors
+      ? Object.values(data.errors).flat().join(' ')
+      : ''
+    const err: any = new Error(validation || data.message || data.mensaje || `Error ${res.status}`)
     err.status = res.status
     err.data = data
     throw err
   }
 
-  return data as T
+  return res.status === 204 ? (undefined as T) : data as T
 }
 
 export const authService = {
@@ -57,7 +61,7 @@ export const authService = {
       credentials: 'include',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ usuario, password, code }),
-    }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json() })),
+    }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) })),
   refresh: () => tryRefresh(),
   logout: () =>
     fetch(`${BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {}),

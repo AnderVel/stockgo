@@ -9,20 +9,36 @@ use App\Services\AuditoriaService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
-
 class MovimientoController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Movimiento::with([
-                'producto',
-                'pedido',
-                'proveedor'
-            ])
-            ->orderByDesc('id_movimiento')
-            ->get()
-        );
+        $query = Movimiento::with([
+            'producto',
+            'pedido',
+            'proveedor',
+        ])->orderByDesc('id_movimiento');
+
+        if ($request->filled('tipo')) {
+            $query->where('tipo', $request->query('tipo'));
+        }
+
+        if ($request->filled('search')) {
+            $search = $request->query('search');
+            $query->whereHas('producto', function ($builder) use ($search): void {
+                $term = '%'.mb_strtolower($search).'%';
+                $builder->whereRaw('LOWER(nombre) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(codigo_barras) LIKE ?', [$term]);
+            });
+        }
+
+        if ($request->boolean('paginate')) {
+            $perPage = min(max($request->integer('per_page', 25), 1), 50);
+
+            return response()->json($query->paginate($perPage));
+        }
+
+        return response()->json($query->get());
     }
 
     public function show(Movimiento $movimiento)
@@ -31,7 +47,7 @@ class MovimientoController extends Controller
             $movimiento->load([
                 'producto',
                 'pedido',
-                'proveedor'
+                'proveedor',
             ])
         );
     }
@@ -50,8 +66,8 @@ class MovimientoController extends Controller
                 'id_producto',
                 $datos['id_producto']
             )
-            ->lockForUpdate()
-            ->firstOrFail();
+                ->lockForUpdate()
+                ->firstOrFail();
 
             $stockAnterior = $producto->stock_fisico;
 
@@ -107,8 +123,8 @@ class MovimientoController extends Controller
                 'id_producto',
                 $datos['id_producto']
             )
-            ->lockForUpdate()
-            ->firstOrFail();
+                ->lockForUpdate()
+                ->firstOrFail();
 
             if (
                 $datos['cantidad'] >
@@ -139,10 +155,10 @@ class MovimientoController extends Controller
             ]);
         });
 
-        if (!$movimiento) {
+        if (! $movimiento) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Stock disponible insuficiente.'
+                'message' => 'Stock disponible insuficiente.',
             ], 422);
         }
 
@@ -177,8 +193,8 @@ class MovimientoController extends Controller
                 'id_producto',
                 $datos['id_producto']
             )
-            ->lockForUpdate()
-            ->firstOrFail();
+                ->lockForUpdate()
+                ->firstOrFail();
 
             $nuevoStockFisico =
                 $producto->stock_fisico +
@@ -212,11 +228,10 @@ class MovimientoController extends Controller
             ]);
         });
 
-        if (!$movimiento) {
+        if (! $movimiento) {
             return response()->json([
                 'status' => 'error',
-                'message' =>
-                    'El ajuste dejaría el stock físico por debajo del stock reservado.'
+                'message' => 'El ajuste dejaría el stock físico por debajo del stock reservado.',
             ], 422);
         }
 
@@ -259,7 +274,7 @@ class MovimientoController extends Controller
         if ($resultado['error']) {
             return response()->json([
                 'status' => 'error',
-                'message' => $resultado['mensaje']
+                'message' => $resultado['mensaje'],
             ], 422);
         }
 
@@ -277,7 +292,7 @@ class MovimientoController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Movimiento registrado'
+            'message' => 'Movimiento registrado',
         ], 200);
     }
 
@@ -306,7 +321,7 @@ class MovimientoController extends Controller
         if ($resultado['error']) {
             return response()->json([
                 'status' => 'error',
-                'message' => $resultado['mensaje']
+                'message' => $resultado['mensaje'],
             ], 422);
         }
 
@@ -344,13 +359,13 @@ class MovimientoController extends Controller
                 'codigo_barras',
                 $codigoBarras
             )
-            ->lockForUpdate()
-            ->first();
+                ->lockForUpdate()
+                ->first();
 
-            if (!$producto) {
+            if (! $producto) {
                 return [
                     'error' => true,
-                    'mensaje' => 'Código de producto no registrado.'
+                    'mensaje' => 'Código de producto no registrado.',
                 ];
             }
 
@@ -386,8 +401,7 @@ class MovimientoController extends Controller
             if ($cantidad > $stockDisponible) {
                 return [
                     'error' => true,
-                    'mensaje' =>
-                        'La cantidad solicitada excede el stock disponible.'
+                    'mensaje' => 'La cantidad solicitada excede el stock disponible.',
                 ];
             }
 

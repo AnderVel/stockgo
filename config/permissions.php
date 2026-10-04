@@ -6,6 +6,7 @@ return [
 
         'Operador de Almacén' => [
             'products.view',
+            'dashboard.view',
 
             'inventory.view',
             'inventory.picking',
@@ -16,6 +17,7 @@ return [
 
         'Administrador' => [
             'products.view',
+            'dashboard.view',
             'products.create',
             'products.update',
             'products.delete',

@@ -1,63 +1,20 @@
 import { useEffect, useState } from 'react'
-import { userService } from '../api/services'
-import { DataTable, StatusBadge } from '../components/ui'
+import { userService, type PageResponse } from '../api/services'
+import { DataTable, ErrorState, LoadingState, PageHeader, Pagination, StatusBadge } from '../components/ui'
 import Modal from '../components/Modal'
+import { useToast } from '../components/Toast'
 
-const campoStyle = { width: '100%', padding: '0.5rem', marginBottom: '0.5rem', borderRadius: '0.25rem', border: '1px solid #ccc' }
+const blank = { name: '', username: '', email: '', password: '', rol: 'Operador de Almacén', activo: true, bodega_asignada: '' }
 
 export default function Usuarios() {
-  const [rows, setRows] = useState<any[]>([])
-  const [error, setError] = useState('')
-  const [editing, setEditing] = useState<any | null>(null)
-  const [form, setForm] = useState<any>({})
-  const [showForm, setShowForm] = useState(false)
-  const [saving, setSaving] = useState(false)
-
-  const load = () => userService.list().then(setRows).catch((e) => setError(e.message))
-  useEffect(() => { load() }, [])
-
-  const openAdd = () => { setForm({ name: '', username: '', email: '', password: '', rol: 'Operador de Almacén', bodega_asignada: '' }); setEditing(null); setShowForm(true) }
-  const openEdit = (u: any) => { setForm({ name: u.name, rol: u.rol, bodega_asignada: u.bodega_asignada }); setEditing(u); setShowForm(true) }
-
-  const save = async (e: React.FormEvent) => { e.preventDefault(); setSaving(true); try { if (editing) await userService.update(editing.id, form); else await userService.create(form); setForm({}); setEditing(null); setShowForm(false); await load() } catch (err: any) { setError(err.message) } finally { setSaving(false) } }
-
-  const handleReset2fa = async (u: any) => { try { await userService.reset2fa(u.id); await load() } catch (err: any) { setError(err.message) } }
-
-  return (
-    <div>
-      <h2>Usuarios</h2>
-      <button style={{ marginBottom: '1rem' }} onClick={openAdd}>+ Nuevo usuario</button>
-      {error && <p style={{ color: '#991b1b' }}>{error}</p>}
-      <DataTable
-        rows={rows}
-        columns={[
-          { key: 'id', label: 'ID' },
-          { key: 'username', label: 'Usuario' },
-          { key: 'name', label: 'Nombre' },
-          { key: 'email', label: 'Correo' },
-          { key: 'rol', label: 'Rol', render: (r) => <StatusBadge estado={r.rol} /> },
-          { key: 'bodega_asignada', label: 'Bodega' },
-          { key: 'two_factor_enabled', label: '2FA', render: (r) => <StatusBadge estado={r.two_factor_enabled ? 'ACTIVO' : 'INACTIVO'} /> },
-          { key: 'actions', label: 'Acciones', render: (r) => (<>
-            <button style={{ padding: '0.2rem 0.4rem' }} onClick={() => openEdit(r)}>Editar</button>
-            <button style={{ padding: '0.2rem 0.4rem', background: '#f59e0b' }} onClick={() => handleReset2fa(r)}>Reset 2FA</button>
-          </>) },
-        ]}
-      />
-      <Modal open={showForm} title={editing ? 'Editar usuario' : 'Nuevo usuario'} onClose={() => { setForm({}); setEditing(null); setShowForm(false) }}>
-        <form onSubmit={save}>
-          <input style={campoStyle} name="name" placeholder="Nombre" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-          <input style={campoStyle} name="username" placeholder="Usuario" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} required={!editing} />
-          <input style={campoStyle} name="email" placeholder="Correo" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          {!editing && <input style={campoStyle} type="password" name="password" placeholder="Contraseña" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />}
-          <select style={campoStyle} value={form.rol} onChange={(e) => setForm({ ...form, rol: e.target.value })} required>
-            <option value="Administrador">Administrador</option>
-            <option value="Operador de Almacén">Operador de Almacén</option>
-          </select>
-          <input style={campoStyle} name="bodega_asignada" placeholder="Bodega" value={form.bodega_asignada} onChange={(e) => setForm({ ...form, bodega_asignada: e.target.value })} required />
-          <button type="submit" disabled={saving}>{saving ? 'Guardando...' : editing ? 'Actualizar' : 'Crear'}</button>
-        </form>
-      </Modal>
-    </div>
-  )
+  const [rows, setRows] = useState<any[]>([]); const [query, setQuery] = useState(''); const [page, setPage] = useState(1); const [meta, setMeta] = useState<PageResponse<any> | null>(null); const [form, setForm] = useState<any>(blank); const [editing, setEditing] = useState<any | null>(null); const [show, setShow] = useState(false); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [error, setError] = useState<any>(null); const { showToast } = useToast()
+  const load = async (requestedPage = page, search = query) => { setError(null); setLoading(true); try { const response = await userService.list({ page: requestedPage, search }); setRows(response.data); setMeta(response) } catch (caught) { setError(caught) } finally { setLoading(false) } }
+  useEffect(() => { void load(page, query) }, [page, query])
+  const openAdd = () => { setForm({ ...blank }); setEditing(null); setShow(true) }
+  const openEdit = (user: any) => { setForm({ name: user.name, username: user.username, email: user.email || '', rol: user.rol, activo: user.activo !== false, bodega_asignada: user.bodega_asignada || '' }); setEditing(user); setShow(true) }
+  const save = async (event: React.FormEvent) => { event.preventDefault(); setSaving(true); try { if (editing) { await userService.update(editing.id, { name: form.name, rol: form.rol, activo: form.activo, bodega_asignada: form.bodega_asignada }); showToast('Usuario actualizado correctamente.', 'success') } else { await userService.create(form); showToast('Usuario creado y activo correctamente.', 'success') }; setShow(false); setEditing(null); setForm({ ...blank }); await load() } catch (caught: any) { showToast(caught.message, 'error'); setError(caught) } finally { setSaving(false) } }
+  const reset2fa = async (user: any) => { try { await userService.reset2fa(user.id); showToast('2FA reiniciado. El usuario deberá configurarlo de nuevo.', 'success'); await load() } catch (caught: any) { showToast(caught.message, 'error') } }
+  return <div className="page-stack"><PageHeader title="Usuarios" description="Controla acceso, rol, estado y segundo factor por cuenta." action={<button className="button-primary" onClick={openAdd}>Nuevo usuario <span>+</span></button>} /><div className="toolbar"><label className="search-field"><span>⌕</span><input placeholder="Buscar usuario, rol o bodega…" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} /></label><span className="result-count">{meta?.total ?? 0} usuarios</span></div>{error && !loading ? <ErrorState error={error} /> : loading ? <LoadingState text="Cargando usuarios…" /> : <><DataTable rows={rows} columns={[{ key: 'name', label: 'Usuario', render: (row) => <div className="entity-cell"><span className="entity-avatar user-avatar">{row.name?.slice(0, 1)}</span><span><strong>{row.name}</strong><small>@{row.username}</small></span></div> }, { key: 'rol', label: 'Rol', render: (row) => <StatusBadge estado={row.rol} /> }, { key: 'bodega_asignada', label: 'Bodega' }, { key: 'activo', label: 'Estado', render: (row) => <StatusBadge estado={row.activo === false ? 'INACTIVO' : 'ACTIVO'} /> }, { key: 'two_factor_enabled', label: '2FA', render: (row) => <StatusBadge estado={row.two_factor_enabled ? 'CONFIGURADO' : 'PENDIENTE'} /> }, { key: 'actions', label: '', render: (row) => <div className="table-actions"><button className="button-quiet" onClick={() => openEdit(row)}>Editar</button><button className="button-warning-quiet" onClick={() => reset2fa(row)}>Reset 2FA</button></div> }]} />{meta && <Pagination currentPage={meta.current_page} lastPage={meta.last_page} total={meta.total} from={meta.from} to={meta.to} onChange={setPage} />}</>}
+    <Modal open={show} title={editing ? 'Editar usuario' : 'Nuevo usuario'} onClose={() => !saving && setShow(false)} busy={saving}><form className="form-grid" onSubmit={save}><label>Nombre completo<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></label><label>Usuario<input value={form.username} disabled={!!editing} onChange={(event) => setForm({ ...form, username: event.target.value })} required={!editing} /></label><label>Correo<input type="email" value={form.email} disabled={!!editing} onChange={(event) => setForm({ ...form, email: event.target.value })} required={!editing} /></label>{!editing && <label>Contraseña<input type="password" minLength={8} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required /></label>}<label>Rol<select value={form.rol} onChange={(event) => setForm({ ...form, rol: event.target.value })}><option>Administrador</option><option>Operador de Almacén</option></select></label><label>Bodega<input value={form.bodega_asignada} onChange={(event) => setForm({ ...form, bodega_asignada: event.target.value })} required /></label>{editing && <label className="toggle-label"><input type="checkbox" checked={form.activo} onChange={(event) => setForm({ ...form, activo: event.target.checked })} /> Cuenta activa</label>}<div className="form-note form-span">Cada usuario configura su propio secreto TOTP. Resetear 2FA no expone ni reutiliza secretos.</div><div className="modal-footer form-span"><button type="button" className="button-secondary" onClick={() => setShow(false)} disabled={saving}>Cancelar</button><button className="button-primary" disabled={saving}>{saving ? 'Guardando…' : editing ? 'Guardar cambios' : 'Crear usuario'}</button></div></form></Modal>
+  </div>
 }

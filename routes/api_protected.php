@@ -1,8 +1,9 @@
 <?php
 
-use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AuditoriaController;
+use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClienteController;
+use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\MovimientoController;
 use App\Http\Controllers\Api\PedidoController;
 use App\Http\Controllers\Api\ProductoController;
@@ -14,6 +15,11 @@ Route::get(
     '/auth/me',
     [AuthController::class, 'me']
 );
+
+Route::get(
+    '/dashboard',
+    [DashboardController::class, 'index']
+)->middleware('permission:dashboard.view');
 
 Route::get(
     '/productos',

@@ -4,7 +4,7 @@ import { authService, setTokens, getToken } from '../api/client'
 interface AuthState {
   user: any | null
   loading: boolean
-  login: (u: string, p: string, c: string) => Promise<{ ok: boolean; message?: string }>
+  login: (u: string, p: string, c: string) => Promise<{ ok: boolean; message?: string; status?: number }>
   logout: () => void
 }
 
@@ -19,16 +19,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .refresh()
       .then(async (ok) => {
         if (ok) {
-          const r: any = await authService.me()
-          setUser(r.user)
+          try {
+            const r: any = await authService.me()
+            setUser(r.user)
+          } catch {
+            setTokens(null)
+          }
         }
       })
+      .catch(() => setTokens(null))
       .finally(() => setLoading(false))
   }, [])
 
   const login = async (usuario: string, password: string, code: string) => {
     const res = await authService.login(usuario, password, code)
-    if (!res.ok) return { ok: false, message: res.body?.message }
+    if (!res.ok) return { ok: false, message: res.body?.message, status: res.status }
     setTokens(res.body.token)
     setUser(res.body.user)
     return { ok: true }

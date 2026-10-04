@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -16,6 +15,7 @@ use Laravel\Sanctum\HasApiTokens;
     'email',
     'password',
     'rol',
+    'activo',
     'bodega_asignada',
 ])]
 #[Hidden([
@@ -35,6 +35,7 @@ class User extends Authenticatable
             'two_factor_secret' => 'encrypted',
             'two_factor_enabled' => 'boolean',
             'two_factor_last_timestamp' => 'integer',
+            'activo' => 'boolean',
         ];
     }
 }

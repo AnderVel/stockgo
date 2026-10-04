@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
+import ResetPassword from './pages/ResetPassword'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Productos = lazy(() => import('./pages/Productos'))
@@ -18,6 +19,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route
         path="*"
         element={

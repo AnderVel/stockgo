@@ -1,31 +1,9 @@
-import { useEffect, useState } from 'react'
-import { productService } from '../api/services'
-import { DataTable, StatusBadge } from '../components/ui'
+import { useEffect, useMemo, useState } from 'react'
+import { productService, type PageResponse } from '../api/services'
+import { DataTable, ErrorState, LoadingState, PageHeader, Pagination, StatusBadge } from '../components/ui'
 
 export default function Inventario() {
-  const [rows, setRows] = useState<any[]>([])
-  const [q, setQ] = useState('')
-
-  useEffect(() => { productService.list().then(setRows).catch(() => {}) }, [])
-
-  const filtered = rows.filter((p) => p.nombre?.toLowerCase().includes(q.toLowerCase()) || p.codigo_barras?.includes(q))
-
-  return (
-    <div>
-      <h2>Inventario</h2>
-      <input placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} />
-      <DataTable
-        rows={filtered}
-        columns={[
-          { key: 'codigo_barras', label: 'Código' },
-          { key: 'nombre', label: 'Producto' },
-          { key: 'ubicacion', label: 'Ubicación' },
-          { key: 'stock_fisico', label: 'Físico' },
-          { key: 'stock_reservado', label: 'Reservado' },
-          { key: 'stock_disponible', label: 'Disponible' },
-          { key: 'estado', label: 'Estado', render: (r) => <StatusBadge estado={r.estado} /> },
-        ]}
-      />
-    </div>
-  )
+  const [rows, setRows] = useState<any[]>([]); const [query, setQuery] = useState(''); const [page, setPage] = useState(1); const [meta, setMeta] = useState<PageResponse<any> | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState<any>(null)
+  useEffect(() => { setLoading(true); productService.list({ page, search: query }).then((response) => { setRows(response.data); setMeta(response) }).catch(setError).finally(() => setLoading(false)) }, [page, query])
+  return <div className="page-stack"><PageHeader title="Inventario" description="Visibilidad del stock físico, reservado y disponible por producto." /><div className="toolbar"><label className="search-field"><span>⌕</span><input placeholder="Buscar producto o código…" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} /></label><span className="result-count">{meta?.total ?? 0} productos</span></div>{loading ? <LoadingState text="Cargando inventario…" /> : error ? <ErrorState error={error} /> : <><DataTable rows={rows} columns={[{ key: 'nombre', label: 'Producto', render: (row) => <div className="entity-cell"><span className="entity-avatar product-avatar">{row.nombre?.slice(0, 1)}</span><span><strong>{row.nombre}</strong><small>{row.codigo_barras}</small></span></div> }, { key: 'ubicacion', label: 'Ubicación' }, { key: 'stock_fisico', label: 'Físico' }, { key: 'stock_reservado', label: 'Reservado' }, { key: 'stock_disponible', label: 'Disponible', render: (row) => <strong className={row.stock_disponible <= 5 ? 'stock-warning' : 'stock-ok'}>{row.stock_disponible}</strong> }, { key: 'estado', label: 'Estado', render: (row) => <StatusBadge estado={row.estado} /> }]} />{meta && <Pagination currentPage={meta.current_page} lastPage={meta.last_page} total={meta.total} from={meta.from} to={meta.to} onChange={setPage} />}</>}</div>
 }
