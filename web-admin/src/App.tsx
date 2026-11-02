@@ -14,6 +14,7 @@ const Clientes = lazy(() => import('./pages/Clientes'))
 const Proveedores = lazy(() => import('./pages/Proveedores'))
 const Usuarios = lazy(() => import('./pages/Usuarios'))
 const Auditoria = lazy(() => import('./pages/Auditoria'))
+const Roles = lazy(() => import('./pages/Roles'))
 
 export default function App() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
                   <Route path="/proveedores" element={<Proveedores />} />
                   <Route path="/usuarios" element={<Usuarios />} />
                   <Route path="/auditoria" element={<Auditoria />} />
+                  <Route path="/roles" element={<Roles />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Suspense>

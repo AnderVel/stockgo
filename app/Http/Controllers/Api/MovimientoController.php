@@ -6,11 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\Movimiento;
 use App\Models\Producto;
 use App\Services\AuditoriaService;
+use App\Services\StockService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class MovimientoController extends Controller
 {
+    public function __construct(
+        private StockService $stockService
+    ) {}
+
     public function index(Request $request)
     {
         $query = Movimiento::with([
@@ -61,35 +67,40 @@ class MovimientoController extends Controller
             'motivo' => 'nullable|string|max:255',
         ]);
 
-        $movimiento = DB::transaction(function () use ($datos) {
-            $producto = Producto::where(
-                'id_producto',
-                $datos['id_producto']
-            )
-                ->lockForUpdate()
-                ->firstOrFail();
+        try {
+            $movimiento = DB::transaction(function () use ($datos) {
+                $producto = Producto::where('id_producto', $datos['id_producto'])
+                    ->lockForUpdate()
+                    ->firstOrFail();
 
-            $stockAnterior = $producto->stock_fisico;
-
-            $producto->stock_fisico += $datos['cantidad'];
-
-            $producto->stock_disponible =
-                $producto->stock_fisico -
-                $producto->stock_reservado;
-
-            $producto->save();
-
-            return Movimiento::create([
-                'id_producto' => $producto->id_producto,
-                'tipo' => 'ENTRADA',
-                'cantidad' => $datos['cantidad'],
-                'motivo' => $datos['motivo'] ?? 'Entrada de mercancía',
-                'id_proveedor' => $datos['id_proveedor'] ?? null,
-                'stock_anterior' => $stockAnterior,
-                'stock_nuevo' => $producto->stock_fisico,
-                'usuario_id' => auth()->id(),
+                return $this->stockService->entrada(
+                    $producto,
+                    $datos['cantidad'],
+                    $datos['id_proveedor'] ?? null,
+                    $datos['motivo'] ?? null
+                );
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 422);
+        } catch (QueryException $e) {
+            \Log::error('QueryException en movimiento', [
+                'message' => $e->getMessage(),
+                'code' => $e->getCode(),
+                'sql' => $e->getSQL(),
+                'bindings' => $e->getBindings(),
+                'method' => $request->method(),
+                'route' => $request->route()?->uri(),
+                'trace' => collect(explode("\n", $e->getTraceAsString()))->take(10)->toArray(),
             ]);
-        });
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error de base de datos al registrar el movimiento.',
+            ], 500);
+        }
 
         app(AuditoriaService::class)->registrar(
             'CREAR',
@@ -118,48 +129,39 @@ class MovimientoController extends Controller
             'motivo' => 'nullable|string|max:255',
         ]);
 
-        $movimiento = DB::transaction(function () use ($datos) {
-            $producto = Producto::where(
-                'id_producto',
-                $datos['id_producto']
-            )
-                ->lockForUpdate()
-                ->firstOrFail();
+        try {
+            $movimiento = DB::transaction(function () use ($datos) {
+                $producto = Producto::where('id_producto', $datos['id_producto'])
+                    ->lockForUpdate()
+                    ->firstOrFail();
 
-            if (
-                $datos['cantidad'] >
-                $producto->stock_disponible
-            ) {
-                return null;
-            }
-
-            $stockAnterior = $producto->stock_fisico;
-
-            $producto->stock_fisico -= $datos['cantidad'];
-
-            $producto->stock_disponible =
-                $producto->stock_fisico -
-                $producto->stock_reservado;
-
-            $producto->save();
-
-            return Movimiento::create([
-                'id_producto' => $producto->id_producto,
-                'tipo' => 'SALIDA',
-                'cantidad' => $datos['cantidad'],
-                'motivo' => $datos['motivo'] ?? 'Salida de mercancía',
-                'id_pedido' => $datos['id_pedido'] ?? null,
-                'stock_anterior' => $stockAnterior,
-                'stock_nuevo' => $producto->stock_fisico,
-                'usuario_id' => auth()->id(),
-            ]);
-        });
-
-        if (! $movimiento) {
+                return $this->stockService->salida(
+                    $producto,
+                    $datos['cantidad'],
+                    $datos['id_pedido'] ?? null,
+                    $datos['motivo'] ?? null
+                );
+            });
+        } catch (\InvalidArgumentException $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Stock disponible insuficiente.',
+                'message' => $e->getMessage(),
             ], 422);
+        } catch (QueryException $e) {
+            \Log::error('QueryException en movimiento', [
+                'message' => $e->getMessage(),
+                'code' => $e->getCode(),
+                'sql' => $e->getSQL(),
+                'bindings' => $e->getBindings(),
+                'method' => $request->method(),
+                'route' => $request->route()?->uri(),
+                'trace' => collect(explode("\n", $e->getTraceAsString()))->take(10)->toArray(),
+            ]);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error de base de datos al registrar el movimiento.',
+            ], 500);
         }
 
         app(AuditoriaService::class)->registrar(
@@ -188,51 +190,38 @@ class MovimientoController extends Controller
             'motivo' => 'required|string|max:255',
         ]);
 
-        $movimiento = DB::transaction(function () use ($datos) {
-            $producto = Producto::where(
-                'id_producto',
-                $datos['id_producto']
-            )
-                ->lockForUpdate()
-                ->firstOrFail();
+        try {
+            $movimiento = DB::transaction(function () use ($datos) {
+                $producto = Producto::where('id_producto', $datos['id_producto'])
+                    ->lockForUpdate()
+                    ->firstOrFail();
 
-            $nuevoStockFisico =
-                $producto->stock_fisico +
-                $datos['cantidad'];
-
-            if (
-                $nuevoStockFisico <
-                $producto->stock_reservado
-            ) {
-                return null;
-            }
-
-            $stockAnterior = $producto->stock_fisico;
-
-            $producto->stock_fisico = $nuevoStockFisico;
-
-            $producto->stock_disponible =
-                $producto->stock_fisico -
-                $producto->stock_reservado;
-
-            $producto->save();
-
-            return Movimiento::create([
-                'id_producto' => $producto->id_producto,
-                'tipo' => 'AJUSTE',
-                'cantidad' => $datos['cantidad'],
-                'motivo' => $datos['motivo'],
-                'stock_anterior' => $stockAnterior,
-                'stock_nuevo' => $producto->stock_fisico,
-                'usuario_id' => auth()->id(),
-            ]);
-        });
-
-        if (! $movimiento) {
+                return $this->stockService->ajuste(
+                    $producto,
+                    $datos['cantidad'],
+                    $datos['motivo']
+                );
+            });
+        } catch (\InvalidArgumentException $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'El ajuste dejaría el stock físico por debajo del stock reservado.',
+                'message' => $e->getMessage(),
             ], 422);
+        } catch (QueryException $e) {
+            \Log::error('QueryException en movimiento', [
+                'message' => $e->getMessage(),
+                'code' => $e->getCode(),
+                'sql' => $e->getSQL(),
+                'bindings' => $e->getBindings(),
+                'method' => $request->method(),
+                'route' => $request->route()?->uri(),
+                'trace' => collect(explode("\n", $e->getTraceAsString()))->take(10)->toArray(),
+            ]);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error de base de datos al registrar el movimiento.',
+            ], 500);
         }
 
         app(AuditoriaService::class)->registrar(
@@ -259,17 +248,42 @@ class MovimientoController extends Controller
             'codigo_barras' => 'required|string',
             'tipo_movimiento' => 'required|in:recepcion,picking',
             'cantidad' => 'required|integer|min:1',
+            'id_pedido' => 'nullable|integer|min:1',
             // Se acepta por compatibilidad con Android pero ya NO se confía en él:
             // la identidad del operador siempre es la del token autenticado.
             'usuario_id' => 'nullable|integer|min:1',
         ]);
 
-        $resultado = $this->ejecutarMovimiento(
-            $datos['codigo_barras'],
-            $datos['tipo_movimiento'],
-            $datos['cantidad'],
-            null
-        );
+        try {
+            $resultado = DB::transaction(function () use ($datos) {
+                return $this->stockService->ejecutarMovimientoAndroid(
+                    $datos['codigo_barras'],
+                    $datos['tipo_movimiento'],
+                    $datos['cantidad'],
+                    $datos['id_pedido'] ?? null
+                );
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 422);
+        } catch (QueryException $e) {
+            \Log::error('QueryException en movimiento', [
+                'message' => $e->getMessage(),
+                'code' => $e->getCode(),
+                'sql' => $e->getSQL(),
+                'bindings' => $e->getBindings(),
+                'method' => $request->method(),
+                'route' => $request->route()?->uri(),
+                'trace' => collect(explode("\n", $e->getTraceAsString()))->take(10)->toArray(),
+            ]);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error de base de datos al registrar el movimiento.',
+            ], 500);
+        }
 
         if ($resultado['error']) {
             return response()->json([
@@ -309,14 +323,36 @@ class MovimientoController extends Controller
             'pedido_id' => 'nullable|integer|exists:pedidos,id_pedido',
         ]);
 
-        $tipoMovimiento = $datos['tipo'] === 'entrada' ? 'recepcion' : 'picking';
+        try {
+            $resultado = DB::transaction(function () use ($producto, $datos) {
+                return $this->stockService->ejecutarMovimientoProducto(
+                    $producto,
+                    $datos['tipo'],
+                    $datos['cantidad'],
+                    $datos['pedido_id'] ?? null
+                );
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 422);
+        } catch (QueryException $e) {
+            \Log::error('QueryException en movimiento', [
+                'message' => $e->getMessage(),
+                'code' => $e->getCode(),
+                'sql' => $e->getSQL(),
+                'bindings' => $e->getBindings(),
+                'method' => $request->method(),
+                'route' => $request->route()?->uri(),
+                'trace' => collect(explode("\n", $e->getTraceAsString()))->take(10)->toArray(),
+            ]);
 
-        $resultado = $this->ejecutarMovimiento(
-            $producto->codigo_barras,
-            $tipoMovimiento,
-            $datos['cantidad'],
-            $datos['pedido_id'] ?? null
-        );
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error de base de datos al registrar el movimiento.',
+            ], 500);
+        }
 
         if ($resultado['error']) {
             return response()->json([
@@ -352,83 +388,78 @@ class MovimientoController extends Controller
         ], 200);
     }
 
-    private function ejecutarMovimiento(string $codigoBarras, string $tipoMovimiento, int $cantidad, ?int $idPedido)
+    /**
+     * Registra una entrada de mercancía (recepción de proveedor) para un producto específico.
+     * POST /api/productos/{producto}/entrada
+     * Body: { "cantidad": int, "motivo": string|null, "id_proveedor": int|null }
+     */
+    public function entradaProducto(Request $request, Producto $producto)
     {
-        return DB::transaction(function () use ($codigoBarras, $tipoMovimiento, $cantidad, $idPedido) {
-            $producto = Producto::where(
-                'codigo_barras',
-                $codigoBarras
-            )
-                ->lockForUpdate()
-                ->first();
+        $datos = $request->validate([
+            'cantidad' => 'required|integer|min:1',
+            'motivo' => 'nullable|string|max:255',
+            'id_proveedor' => 'nullable|exists:proveedores,id_proveedor',
+        ]);
 
-            if (! $producto) {
-                return [
-                    'error' => true,
-                    'mensaje' => 'Código de producto no registrado.',
-                ];
-            }
+        try {
+            $movimiento = DB::transaction(function () use ($producto, $datos) {
+                // Recargar el producto con lock para evitar condiciones de carrera
+                $producto = Producto::where('id_producto', $producto->id_producto)
+                    ->lockForUpdate()
+                    ->firstOrFail();
 
-            $stockDisponible =
-                $producto->stock_fisico -
-                $producto->stock_reservado;
-
-            if ($tipoMovimiento === 'recepcion') {
-                $stockAnterior = $producto->stock_fisico;
-
-                $producto->stock_fisico += $cantidad;
-
-                $producto->stock_disponible =
-                    $producto->stock_fisico -
-                    $producto->stock_reservado;
-
-                $producto->save();
-
-                Movimiento::create([
-                    'id_producto' => $producto->id_producto,
-                    'tipo' => 'ENTRADA',
-                    'cantidad' => $cantidad,
-                    'motivo' => 'Recepción de mercancía',
-                    'id_pedido' => $idPedido,
-                    'stock_anterior' => $stockAnterior,
-                    'stock_nuevo' => $producto->stock_fisico,
-                    'usuario_id' => auth()->id(),
-                ]);
-
-                return ['error' => false];
-            }
-
-            if ($cantidad > $stockDisponible) {
-                return [
-                    'error' => true,
-                    'mensaje' => 'La cantidad solicitada excede el stock disponible.',
-                ];
-            }
-
-            $stockAnterior = $producto->stock_fisico;
-
-            $producto->stock_fisico -= $cantidad;
-
-            $producto->stock_reservado = max(0, $producto->stock_reservado - $cantidad);
-
-            $producto->stock_disponible =
-                $producto->stock_fisico -
-                $producto->stock_reservado;
-
-            $producto->save();
-
-            Movimiento::create([
-                'id_producto' => $producto->id_producto,
-                'tipo' => 'SALIDA',
-                'cantidad' => $cantidad,
-                'motivo' => 'Picking desde Android',
-                'id_pedido' => $idPedido,
-                'stock_anterior' => $stockAnterior,
-                'stock_nuevo' => $producto->stock_fisico,
-                'usuario_id' => auth()->id(),
+                return $this->stockService->entrada(
+                    $producto,
+                    $datos['cantidad'],
+                    $datos['id_proveedor'] ?? null,
+                    $datos['motivo'] ?? 'Recepción de mercancía'
+                );
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 422);
+        } catch (QueryException $e) {
+            \Log::error('QueryException en movimiento', [
+                'message' => $e->getMessage(),
+                'code' => $e->getCode(),
+                'sql' => $e->getSQL(),
+                'bindings' => $e->getBindings(),
+                'method' => $request->method(),
+                'route' => $request->route()?->uri(),
+                'trace' => collect(explode("\n", $e->getTraceAsString()))->take(10)->toArray(),
             ]);
 
-            return ['error' => false];
-        });
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error de base de datos al registrar el movimiento.',
+            ], 500);
+        }
+
+        $producto->refresh();
+
+        app(AuditoriaService::class)->registrar(
+            'CREAR',
+            'MOVIMIENTOS',
+            'Entrada de mercancía registrada.',
+            [
+                'id_producto' => $producto->id_producto,
+                'cantidad' => $movimiento->cantidad,
+                'id_proveedor' => $movimiento->id_proveedor ?? null,
+            ],
+            $request
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Entrada registrada',
+            'producto' => [
+                'id_producto' => $producto->id_producto,
+                'stock_fisico' => $producto->stock_fisico,
+                'stock_reservado' => $producto->stock_reservado,
+                'stock_disponible' => $producto->stock_disponible,
+            ],
+        ], 201);
     }
 }

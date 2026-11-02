@@ -7,12 +7,16 @@ use App\Models\User;
 use App\Models\WebRefreshToken;
 use App\Services\AuditoriaService;
 use App\Services\JwtService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
+use PDOException;
 use PragmaRX\Google2FA\Google2FA;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\Cookie;
 
 class WebAuthController extends Controller
@@ -72,11 +76,12 @@ class WebAuthController extends Controller
             ], 403);
         }
 
-        if ($user->rol !== 'Administrador') {
+        // Allow both Administrador and Administrador Regular to access Web Admin
+        if (! in_array($user->rol, ['Administrador', 'Administrador Regular'])) {
             app(AuditoriaService::class)->registrar(
                 'LOGIN_WEB_RECHAZADO',
                 'AUTH',
-                'Intento de acceso web sin rol de Administrador.',
+                'Intento de acceso web sin rol autorizado.',
                 ['usuario' => $usuario, 'rol' => $user->rol],
                 $request
             );
@@ -118,9 +123,30 @@ class WebAuthController extends Controller
 
         RateLimiter::clear($key);
 
-        app(AuditoriaService::class)->registrar('LOGIN_WEB', 'AUTH', 'Inicio de sesión web.', [], $request);
+        try {
+            app(AuditoriaService::class)->registrar(
+                'LOGIN_WEB',
+                'AUTH',
+                'Inicio de sesión web.',
+                [],
+                $request,
+                $user->id
+            );
 
-        return $this->emitirSesion($user);
+            return $this->emitirSesion($user);
+        } catch (QueryException|PDOException|RuntimeException $exception) {
+            // Un fallo transitorio de base de datos durante la emisión de la
+            // sesión (auditoría o refresh token) no debe exponer un 500 no controlado.
+            // Se responde con un error estructurado y reintentable.
+            Log::error('Fallo de base de datos al emitir la sesión web.', [
+                'sql_state' => (string) $exception->getCode(),
+            ]);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El servicio de sesión no está disponible temporalmente. Intenta de nuevo.',
+            ], 503)->header('Retry-After', '2');
+        }
     }
 
     public function setupTwoFactor(Request $request)
@@ -147,7 +173,8 @@ class WebAuthController extends Controller
             ], 403);
         }
 
-        if ($user->rol !== 'Administrador') {
+        // Allow both Administrador and Administrador Regular to setup 2FA for web
+        if (! in_array($user->rol, ['Administrador', 'Administrador Regular'])) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'El rol no tiene acceso al Web Admin.',
@@ -208,7 +235,7 @@ class WebAuthController extends Controller
             ], 403);
         }
 
-        if ($user->rol !== 'Administrador') {
+        if (! in_array($user->rol, ['Administrador', 'Administrador Regular'])) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'El rol no tiene acceso al Web Admin.',
@@ -261,28 +288,77 @@ class WebAuthController extends Controller
             ], 401);
         }
 
-        $token = DB::transaction(function () use ($refresh) {
-            $t = WebRefreshToken::where('token_hash', hash('sha256', $refresh))
-                ->lockForUpdate()
-                ->first();
+        try {
+            $token = DB::transaction(function () use ($refresh) {
+                $t = WebRefreshToken::where('token_hash', hash('sha256', $refresh))
+                    ->lockForUpdate()
+                    ->first();
 
-            if (! $t || ! $t->esValido()) {
-                return null;
-            }
+                if (! $t || ! $t->esValido()) {
+                    return null;
+                }
 
-            $t->update(['revoked_at' => now()]);
+                $t->update(['revoked_at' => now()]);
 
-            return $t;
-        });
+                return $t;
+            });
+        } catch (QueryException|PDOException $exception) {
+            // Evita reutilizar una conexión que Neon cerró o dejó en transacción abortada.
+            DB::purge();
+
+            Log::error('Fallo de base de datos al renovar la sesión web.', [
+                'sql_state' => (string) $exception->getCode(),
+            ]);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El servicio de sesión no está disponible temporalmente. Intenta de nuevo.',
+            ], 503)->header('Retry-After', '2');
+        }
 
         if (! $token) {
+            app(AuditoriaService::class)->registrar(
+                'REFRESH_TOKEN_INVALIDO',
+                'AUTH',
+                'Intento de uso de refresh token inválido o expirado.',
+                [],
+                $request
+            );
+
             return response()->json([
                 'status' => 'error',
                 'message' => 'Refresh token inválido o expirado.',
             ], 401);
         }
 
-        return $this->emitirSesion($token->user);
+        // Verificar que el usuario asociado exista, esté activo y tenga rol autorizado para Web Admin
+        $user = $token->user;
+        if (! $user || $user->activo === false || ! in_array($user->rol, ['Administrador', 'Administrador Regular'])) {
+            app(AuditoriaService::class)->registrar(
+                'REFRESH_TOKEN_RECHAZADO',
+                'AUTH',
+                'Refresh token rechazado: usuario inactivo, inexistente o sin rol autorizado para Web Admin.',
+                ['usuario_id' => $user?->id, 'activo' => $user?->activo, 'rol' => $user?->rol],
+                $request,
+                $user?->id
+            );
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La cuenta está inactiva o no tiene acceso al Web Admin.',
+            ], 403);
+        }
+
+        app(AuditoriaService::class)->registrar(
+            'REFRESH_TOKEN_EXITOSO',
+            'AUTH',
+            'Refresh token rotado y nueva sesión emitida.',
+            ['usuario_id' => $token->user_id],
+            $request,
+            $token->user_id
+        );
+
+        return $this->emitirSesion($user);
     }
 
     public function logout(Request $request)

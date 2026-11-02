@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuditoriaController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClienteController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\InventarioController;
 use App\Http\Controllers\Api\MovimientoController;
 use App\Http\Controllers\Api\PedidoController;
 use App\Http\Controllers\Api\ProductoController;
@@ -20,6 +21,8 @@ Route::get(
     '/dashboard',
     [DashboardController::class, 'index']
 )->middleware('permission:dashboard.view');
+
+// PRODUCTOS
 
 Route::get(
     '/productos',
@@ -63,6 +66,8 @@ Route::delete(
     [ProductoController::class, 'destroy']
 )->middleware('permission:products.delete');
 
+// CLIENTES
+
 Route::get(
     '/clientes',
     [ClienteController::class, 'index']
@@ -93,9 +98,16 @@ Route::delete(
     [ClienteController::class, 'destroy']
 )->middleware('permission:clients.delete');
 
+// MOVIMIENTOS E INVENTARIO
+
 Route::get(
     '/movimientos',
     [MovimientoController::class, 'index']
+)->middleware('permission:inventory.view');
+
+Route::get(
+    '/movimientos/recientes',
+    [InventarioController::class, 'recientes']
 )->middleware('permission:inventory.view');
 
 Route::get(
@@ -127,6 +139,32 @@ Route::post(
     '/productos/{producto}/movimiento',
     [MovimientoController::class, 'movimientoProducto']
 )->middleware('permission:inventory.picking');
+
+// NUEVA RUTA: ENTRADA DE INVENTARIO POR PRODUCTO
+
+Route::post(
+    '/productos/{producto}/entrada',
+    [MovimientoController::class, 'entradaProducto']
+)->middleware('permission:inventory.receive');
+
+// INVENTARIO
+
+Route::get(
+    '/inventario/resumen',
+    [InventarioController::class, 'resumen']
+)->middleware('permission:inventory.view');
+
+Route::get(
+    '/inventario/alertas',
+    [InventarioController::class, 'alertas']
+)->middleware('permission:inventory.view');
+
+Route::get(
+    '/inventario/por-ubicacion',
+    [InventarioController::class, 'porUbicacion']
+)->middleware('permission:inventory.view');
+
+// PEDIDOS
 
 Route::get(
     '/pedidos',
@@ -178,6 +216,8 @@ Route::post(
     [PedidoController::class, 'cancelar']
 )->middleware('permission:orders.cancel');
 
+// PROVEEDORES
+
 Route::get(
     '/proveedores',
     [ProveedorController::class, 'index']
@@ -208,6 +248,8 @@ Route::delete(
     [ProveedorController::class, 'destroy']
 )->middleware('permission:suppliers.delete');
 
+// USUARIOS
+
 Route::get(
     '/usuarios',
     [UserController::class, 'index']
@@ -232,6 +274,8 @@ Route::post(
     '/usuarios/{user}/reset-2fa',
     [UserController::class, 'resetTwoFactor']
 )->middleware('permission:users.reset_2fa');
+
+// AUDITORÍA
 
 Route::get(
     '/auditorias',

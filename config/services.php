@@ -2,6 +2,8 @@
 
 return [
 
+    'web_admin_url' => env('WEB_ADMIN_URL'),
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

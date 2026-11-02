@@ -86,6 +86,7 @@ export const userService = {
   list: (params: ListParams = {}) => api<PageResponse<any>>(`/usuarios${listQuery(params)}`),
   create: (data: any) => api('/usuarios', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: number, data: any) => api(`/usuarios/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  remove: (id: number) => api(`/usuarios/${id}`, { method: 'DELETE' }),
   reset2fa: (id: number) => api(`/usuarios/${id}/reset-2fa`, { method: 'POST' }),
   setup2fa: (usuario: string, password: string) => api('/auth/2fa/setup', { method: 'POST', body: JSON.stringify({ usuario, password }) }),
   confirm2fa: (usuario: string, password: string, code: string) => api('/auth/2fa/confirm', { method: 'POST', body: JSON.stringify({ usuario, password, code }) }),
@@ -98,4 +99,22 @@ export const auditService = {
     if (params.accion) query.set('accion', params.accion)
     return api<PageResponse<any>>(`/auditorias?${query.toString()}`)
   },
+}
+
+export interface RoleData {
+  name: string
+  permissions: string[]
+  permission_count: number
+}
+
+export interface PermissionsData {
+  roles: string[]
+  permissions_by_module: Record<string, string[]>
+  all_permissions: string[]
+  roles_config: Record<string, string[]>
+}
+
+export const roleService = {
+  getPermissions: () => api<PermissionsData>('/roles/permissions'),
+  getRoles: () => api<RoleData[]>('/roles'),
 }

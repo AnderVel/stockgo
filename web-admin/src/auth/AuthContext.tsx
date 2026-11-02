@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { authService, setTokens, getToken } from '../api/client'
+import { authService, clearSession, hasSession, setTokens } from '../api/client'
 
 interface AuthState {
   user: any | null
@@ -15,20 +15,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (window.location.pathname === '/login') {
+      setLoading(false)
+      return
+    }
+
+    if (!hasSession()) {
+      setLoading(false)
+      return
+    }
+
+    let cancelled = false
+
     authService
       .refresh()
       .then(async (ok) => {
+        if (cancelled) return
         if (ok) {
           try {
             const r: any = await authService.me()
-            setUser(r.user)
-          } catch {
+            if (!cancelled) setUser(r.user)
+          } catch (error: any) {
             setTokens(null)
+            if (error?.status === 401 || error?.status === 403) clearSession()
           }
         }
       })
       .catch(() => setTokens(null))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const login = async (usuario: string, password: string, code: string) => {

@@ -13,12 +13,13 @@ class AuditoriaService
         string $modulo,
         string $descripcion,
         array $detalles = [],
-        ?Request $request = null
+        ?Request $request = null,
+        ?int $usuarioId = null
     ): Auditoria {
         $request = $request ?? request();
 
         return Auditoria::create([
-            'usuario_id' => Auth::id(),
+            'usuario_id' => $usuarioId ?? Auth::id(),
             'accion' => $accion,
             'modulo' => $modulo,
             'descripcion' => $descripcion,

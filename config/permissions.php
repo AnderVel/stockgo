@@ -10,6 +10,7 @@ return [
 
             'inventory.view',
             'inventory.picking',
+            'inventory.receive',
 
             'orders.view',
             'orders.surtir',
@@ -26,6 +27,7 @@ return [
             'inventory.picking',
             'inventory.move',
             'inventory.adjust',
+            'inventory.receive',
 
             'orders.view',
             'orders.create',
@@ -50,6 +52,23 @@ return [
             'users.create',
             'users.update',
             'users.reset_2fa',
+            'users.delete',
+
+            'audit.view',
+        ],
+
+        'Administrador Regular' => [
+            'products.view',
+            'dashboard.view',
+
+            'inventory.view',
+
+            'orders.view',
+            'orders.aceptar',
+
+            'suppliers.view',
+
+            'clients.view',
 
             'audit.view',
         ],

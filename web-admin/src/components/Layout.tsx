@@ -5,7 +5,6 @@ const mainItems = [
   { to: '/', label: 'Resumen', icon: '01' },
   { to: '/productos', label: 'Productos', icon: '02' },
   { to: '/inventario', label: 'Inventario', icon: '03' },
-  { to: '/movimientos', label: 'Movimientos', icon: '04' },
   { to: '/pedidos', label: 'Pedidos', icon: '05' },
   { to: '/clientes', label: 'Clientes', icon: '06' },
   { to: '/proveedores', label: 'Proveedores', icon: '07' },
@@ -13,6 +12,7 @@ const mainItems = [
 
 const adminItems = [
   { to: '/usuarios', label: 'Usuarios', icon: '08' },
+  { to: '/roles', label: 'Roles', icon: '10' },
   { to: '/auditoria', label: 'Auditoría', icon: '09' },
 ]
 
