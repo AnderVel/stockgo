@@ -13,11 +13,14 @@ class JwtService
     {
         $ttl = (int) config('jwt.ttl_minutes', 30);
 
+        $jti = bin2hex(random_bytes(16));
+
         return JWT::encode([
             'iss' => config('app.url'),
             'sub' => $user->id,
             'username' => $user->username,
             'rol' => $user->rol,
+            'jti' => $jti,
             'iat' => time(),
             'exp' => time() + ($ttl * 60),
         ], $this->secret(), 'HS256');

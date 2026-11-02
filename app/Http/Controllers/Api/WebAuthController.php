@@ -108,11 +108,12 @@ class WebAuthController extends Controller
         }
 
         $google2fa = new Google2FA;
-        // Web usa verifyKey (no verifyKeyNewer) para no compartir two_factor_last_timestamp
-        // con Android: ambos clientes pueden consumir el mismo TOTP con códigos distintos
-        // dentro de la misma ventana de 30s sin bloquearse entre sí.
+        // Usar verifyKeyNewer con two_factor_last_timestamp para compartir
+        // el consumo de intervalos TOTP entre Android y Web.
+        // Esto previene que un código del mismo intervalo sea aceptado por ambos clientes.
         // El replay dentro de la ventana se mitiga con rate limiting + rotación de refresh.
-        if (! $google2fa->verifyKey($user->two_factor_secret, $datos['code'])) {
+        $timestamp = $user->two_factor_last_timestamp ?? 0;
+        if (! $google2fa->verifyKeyNewer($user->two_factor_secret, $datos['code'], $timestamp)) {
             RateLimiter::hit($key, 60);
 
             return response()->json([
@@ -122,6 +123,10 @@ class WebAuthController extends Controller
         }
 
         RateLimiter::clear($key);
+
+        $user->forceFill([
+            'two_factor_last_timestamp' => $timestamp,
+        ])->save();
 
         try {
             app(AuditoriaService::class)->registrar(
@@ -368,6 +373,25 @@ class WebAuthController extends Controller
         if ($refresh) {
             WebRefreshToken::where('token_hash', hash('sha256', $refresh))
                 ->update(['revoked_at' => now()]);
+        }
+
+        // Revocar el access token JWT actual
+        $access = $request->header('Authorization', '');
+        if (str_starts_with($access, 'Bearer ')) {
+            try {
+                $payload = app(JwtService::class)->validar(substr($access, 7));
+                $jti = $payload['jti'] ?? null;
+                if ($jti) {
+                    $jtiHash = hash('sha256', $jti);
+                    JwtRevocation::create([
+                        'jti_hash' => $jtiHash,
+                        'expires_at' => now()->addDays((int) config('jwt.refresh_ttl_days', 7)),
+                        'scope' => 'web',
+                    ]);
+                }
+            } catch (\Throwable) {
+                // El token ya podría estar expirado o inválido, no es crítico
+            }
         }
 
         app(AuditoriaService::class)->registrar('LOGOUT_WEB', 'AUTH', 'Sesión web cerrada.', [], $request);
