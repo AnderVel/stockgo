@@ -924,9 +924,9 @@ export default function Pedidos() {
                         type="button"
                         className="button-quiet"
                         disabled={busy === row.id_pedido}
-                        onClick={() => void act(row.id_pedido, () => orderService.recibir(row.id_pedido), 'Pedido recibido.')}
+                        onClick={() => void act(row.id_pedido, () => orderService.recibir(row.id_pedido), 'Pedido entregado al cliente.')}
                       >
-                        Recibir
+                        Entregar
                       </button>
                     )}
                   </div>

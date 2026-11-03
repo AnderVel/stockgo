@@ -33,13 +33,29 @@ export default function Dashboard() {
 
           <div className="dashboard-columns">
             <section className="surface-panel">
-              <div className="section-heading"><div><p className="eyebrow">Actividad</p><h3>Movimientos recientes</h3></div><span className="section-count">Últimos 10</span></div>
+              <div className="section-heading"><div><p className="eyebrow">Actividad</p><h3>Movimientos recientes</h3></div><span className="section-count">Últimos 12</span></div>
               {data.movimientos_recientes.length === 0 ? <EmptyState text="Todavía no hay movimientos." /> : <div className="activity-list">
-                {data.movimientos_recientes.map((movement) => <article className="activity-item" key={movement.id_movimiento}>
-                  <span className={`activity-icon activity-${String(movement.tipo).toLowerCase()}`} aria-hidden="true">{movement.tipo === 'ENTRADA' ? '+' : '−'}</span>
-                  <div className="activity-main"><div className="activity-title"><strong>{movement.motivo || 'Movimiento de inventario'}</strong><StatusBadge estado={movement.tipo} /></div><span>{movement.producto?.nombre || `Producto #${movement.id_producto}`}</span><small>{formatDate(movement.created_at)}</small></div>
-                  <strong className={movement.tipo === 'ENTRADA' ? 'quantity-positive' : 'quantity-negative'}>{movement.tipo === 'ENTRADA' ? '+' : '−'}{movement.cantidad}</strong>
-                </article>)}
+                {data.movimientos_recientes.map((movement) => {
+                  const esPedido = movement.origen === 'pedido'
+                  const etiquetaPedido: Record<string, string> = {
+                    PEDIDO_CREADO: 'CREADO',
+                    PEDIDO_SURTIDO: 'SURTIDO',
+                    PEDIDO_ENVIADO: 'ENVIADO',
+                    PEDIDO_ENTREGADO: 'ENTREGADO',
+                    PEDIDO_CANCELADO: 'CANCELADO',
+                  }
+                  return (
+                    <article className="activity-item" key={movement.id}>
+                      {esPedido ? (
+                        <span className="activity-icon activity-pedido" aria-hidden="true">P</span>
+                      ) : (
+                        <span className={`activity-icon activity-${String(movement.tipo).toLowerCase()}`} aria-hidden="true">{movement.tipo === 'ENTRADA' ? '+' : '−'}</span>
+                      )}
+                      <div className="activity-main"><div className="activity-title"><strong>{movement.titulo || 'Movimiento de inventario'}</strong><StatusBadge estado={esPedido ? (etiquetaPedido[movement.tipo] ?? 'PENDIENTE') : movement.tipo} /></div><span>{movement.producto || (esPedido ? 'Gestión de pedidos' : `Producto #${movement.id_producto}`)}</span><small>{formatDate(movement.created_at)}</small></div>
+                      {!esPedido && <strong className={movement.tipo === 'ENTRADA' ? 'quantity-positive' : 'quantity-negative'}>{movement.tipo === 'ENTRADA' ? '+' : '−'}{movement.cantidad}</strong>}
+                    </article>
+                  )
+                })}
               </div>}
             </section>
 
