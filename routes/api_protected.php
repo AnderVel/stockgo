@@ -275,6 +275,11 @@ Route::post(
     [UserController::class, 'resetTwoFactor']
 )->middleware('permission:users.reset_2fa');
 
+Route::delete(
+    '/usuarios/{user}',
+    [UserController::class, 'destroy']
+)->middleware('permission:users.delete');
+
 // AUDITORÍA
 
 Route::get(
