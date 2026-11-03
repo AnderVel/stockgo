@@ -64,7 +64,7 @@ export const orderService = {
   create: (data: any) => api('/pedidos', { method: 'POST', body: JSON.stringify(data) }),
   cancel: (id: number) => api(`/pedidos/${id}/cancelar`, { method: 'POST' }),
   surtir: (id: number) => api(`/pedidos/${id}/surtir`, { method: 'POST' }),
-  entregar: (id: number) => api(`/pedidos/${id}/entregar`, { method: 'POST' }),
+  entregar: (id: number, correo: string) => api(`/pedidos/${id}/entregar`, { method: 'POST', body: JSON.stringify({ correo }) }),
   recibir: (id: number) => api(`/pedidos/${id}/recibir`, { method: 'POST' }),
 }
 

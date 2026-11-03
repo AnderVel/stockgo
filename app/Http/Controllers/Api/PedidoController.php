@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\PedidoEnviadoMail;
 use App\Models\Cliente;
 use App\Models\Pedido;
 use App\Models\Producto;
@@ -12,6 +13,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class PedidoController extends Controller
 {
@@ -601,9 +603,46 @@ class PedidoController extends Controller
         ]);
     }
 
-    public function entregar(Pedido $pedido)
+    public function entregar(Request $request, Pedido $pedido)
     {
-        $pedido = DB::transaction(function () use ($pedido) {
+        $datos = $request->validate([
+            'correo' => ['nullable', 'email', 'max:255'],
+        ]);
+
+        $pedido->loadMissing(['cliente', 'detalles.producto']);
+
+        $destinatario = $datos['correo'] ?? $pedido->cliente?->correo ?? null;
+
+        if (! $destinatario) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El cliente no tiene correo configurado. Escribe una dirección de correo y vuelve a intentarlo.',
+            ], 422);
+        }
+
+        if ($pedido->estado !== 'SURTIDO') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El pedido debe estar surtido antes de marcarlo como enviado.',
+            ], 409);
+        }
+
+        try {
+            Mail::to($destinatario)->send(new PedidoEnviadoMail($pedido, $destinatario));
+        } catch (\Throwable $e) {
+            Log::error('Error al enviar correo de pedido enviado.', [
+                'id_pedido' => $pedido->id_pedido,
+                'destinatario' => $destinatario,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No se pudo enviar el correo al destinatario. El pedido sigue marcado como surtido.',
+            ], 503);
+        }
+
+        $pedido = DB::transaction(function () use ($pedido, $destinatario) {
             $pedido = Pedido::where('id_pedido', $pedido->id_pedido)
                 ->lockForUpdate()
                 ->firstOrFail();
@@ -619,8 +658,8 @@ class PedidoController extends Controller
             app(AuditoriaService::class)->registrar(
                 'ENTREGAR',
                 'PEDIDOS',
-                'Pedido marcado como enviado.',
-                ['id_pedido' => $pedido->id_pedido],
+                'Pedido enviado al cliente por correo.',
+                ['id_pedido' => $pedido->id_pedido, 'destinatario' => $destinatario],
                 request()
             );
 
@@ -639,7 +678,8 @@ class PedidoController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Pedido marcado como enviado.',
+            'message' => 'Pedido enviado. Correo enviado a ' . $destinatario . '.',
+            'destinatario' => $destinatario,
             'pedido' => $pedido,
         ]);
     }

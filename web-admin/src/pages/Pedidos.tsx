@@ -96,6 +96,9 @@ export default function Pedidos() {
   const [loadingEdit, setLoadingEdit] = useState(false)
   const [originalQuantities, setOriginalQuantities] = useState<Record<number, number>>({})
   const [pedidoParaCancelar, setPedidoParaCancelar] = useState<Pedido | null>(null)
+  const [enviarPedido, setEnviarPedido] = useState<Pedido | null>(null)
+  const [correoEnviar, setCorreoEnviar] = useState('')
+  const [enviarError, setEnviarError] = useState<string | null>(null)
   const [clientQuery, setClientQuery] = useState('')
   const [clientResults, setClientResults] = useState<ClientePedido[]>([])
   const [clientLoading, setClientLoading] = useState(false)
@@ -472,6 +475,46 @@ export default function Pedidos() {
 
     if (wasCancelled) {
       setPedidoParaCancelar(null)
+    }
+  }
+
+  const openEnviar = (row: Pedido) => {
+    setEnviarPedido(row)
+    setCorreoEnviar(row.cliente?.correo ?? '')
+    setEnviarError(null)
+  }
+
+  const closeEnviar = () => {
+    if (busy === enviarPedido?.id_pedido) {
+      return
+    }
+    setEnviarPedido(null)
+    setEnviarError(null)
+  }
+
+  const confirmarEnvio = async () => {
+    if (!enviarPedido) {
+      return
+    }
+
+    const email = correoEnviar.trim()
+    const valido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+
+    if (!valido) {
+      setEnviarError('Ingresa un correo válido, por ejemplo nombre@dominio.com.')
+      return
+    }
+
+    const enviado = await act(
+      enviarPedido.id_pedido,
+      () => orderService.entregar(enviarPedido.id_pedido, email),
+      `Pedido enviado. Correo enviado a ${email}.`,
+    )
+
+    if (enviado) {
+      setEnviarPedido(null)
+      setCorreoEnviar('')
+      setEnviarError(null)
     }
   }
 
@@ -858,14 +901,6 @@ export default function Pedidos() {
                         </button>
                         <button
                           type="button"
-                          className="button-quiet"
-                          disabled={busy === row.id_pedido}
-                          onClick={() => void act(row.id_pedido, () => orderService.surtir(row.id_pedido), 'Pedido surtido.')}
-                        >
-                          Surtir
-                        </button>
-                        <button
-                          type="button"
                           className="button-danger-quiet"
                           disabled={busy === row.id_pedido}
                           onClick={() => setPedidoParaCancelar(row)}
@@ -879,7 +914,7 @@ export default function Pedidos() {
                         type="button"
                         className="button-quiet"
                         disabled={busy === row.id_pedido}
-                        onClick={() => void act(row.id_pedido, () => orderService.entregar(row.id_pedido), 'Pedido enviado.')}
+                        onClick={() => openEnviar(row)}
                       >
                         Enviar
                       </button>
@@ -1322,6 +1357,106 @@ export default function Pedidos() {
             </div>
           </>
         )}
+      </Modal>
+
+      <Modal
+        open={!!enviarPedido}
+        title={enviarPedido ? `Enviar pedido #${enviarPedido.id_pedido}` : 'Enviar pedido'}
+        onClose={closeEnviar}
+        busy={busy === enviarPedido?.id_pedido}
+      >
+        {busy === enviarPedido?.id_pedido ? (
+          <p className="confirm-copy" role="status" tabIndex={0}>
+            Enviando el correo a {correoEnviar}…
+          </p>
+        ) : enviarPedido ? (
+          <>
+            <div className="confirm-copy">
+              <p>
+                Pedido <strong>#{enviarPedido.id_pedido}</strong> listo para entregar
+                al cliente <strong>{enviarPedido.cliente?.nombre ?? 'Cliente'}</strong>.
+              </p>
+              <small>
+                El correo incluye los productos, cantidades, precios y el total del pedido.
+                Por defecto se usa el correo del cliente; puedes cambiarlo para este envío.
+              </small>
+            </div>
+
+            <label className="pedido-observations" htmlFor="correo-destino">
+              Correo del destinatario
+              <input
+                id="correo-destino"
+                type="email"
+                value={correoEnviar}
+                disabled={busy === enviarPedido.id_pedido}
+                onChange={(event) => {
+                  setCorreoEnviar(event.target.value)
+                  setEnviarError(null)
+                }}
+                placeholder="nombre@dominio.com"
+                autoFocus
+              />
+            </label>
+            {enviarError && (
+              <p className="pedido-inline-error" role="alert">
+                {enviarError}
+              </p>
+            )}
+
+            {enviarPedido.detalles && enviarPedido.detalles.length > 0 && (
+              <div className="pedido-detail-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Producto</th>
+                      <th scope="col">Cant.</th>
+                      <th scope="col">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {enviarPedido.detalles.map((detalle, index) => (
+                      <tr key={`${detalle.id_detalle_pedido ?? index}`}>
+                        <td>{detalle.producto?.nombre ?? 'Producto'}</td>
+                        <td>{detalle.cantidad}</td>
+                        <td>{formatCurrency(detalle.subtotal)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="pedido-detail-facts" style={{ marginTop: '12px' }}>
+              <div>
+                <dt>Total</dt>
+                <dd>{formatCurrency(enviarPedido.total)}</dd>
+              </div>
+              <div>
+                <dt>Dirección</dt>
+                <dd>{enviarPedido.cliente?.direccion ?? 'No registrada'}</dd>
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={closeEnviar}
+                disabled={busy === enviarPedido.id_pedido}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="button-primary"
+                onClick={() => void confirmarEnvio()}
+                disabled={busy === enviarPedido.id_pedido}
+              >
+                Enviar correo
+              </button>
+            </div>
+          </>
+        ) : null}
       </Modal>
 
       <Modal
