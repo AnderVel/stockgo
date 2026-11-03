@@ -97,6 +97,12 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            // Neon / pooled connections no garantizan sentencias preparadas
+            // del lado del servidor entre transacciones. Laravel emula las
+            // consultas en el cliente para evitar SQLSTATE 25P02.
+            'options' => [
+                \PDO::ATTR_EMULATE_PREPARES => true,
+            ],
         ],
 
         'sqlsrv' => [

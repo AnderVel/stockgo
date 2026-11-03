@@ -1,0 +1,809 @@
+.orders-page .page-header {
+  align-items: flex-end;
+}
+
+.orders-toolbar {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 13px;
+}
+
+.orders-filter {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: #716d83;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pedido-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  overflow-y: auto;
+  background: rgba(35, 32, 63, .58);
+  backdrop-filter: blur(4px);
+}
+
+.pedido-dialog {
+  width: min(1120px, 100%);
+  max-height: min(92vh, 900px);
+  overflow-y: auto;
+  border: 1px solid #e3e1ee;
+  border-radius: 17px;
+  background: #fff;
+  box-shadow: 0 28px 90px rgba(24, 20, 58, .28);
+  animation: pedido-dialog-enter .16s ease-out;
+}
+
+@keyframes pedido-dialog-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.pedido-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 28px 32px 24px;
+  border-bottom: 1px solid #eceaf3;
+  background: linear-gradient(110deg, #fff 0%, #fbfaff 100%);
+}
+
+.pedido-dialog-kicker {
+  margin: 0 0 8px;
+  color: var(--violet);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+
+.pedido-dialog-header h2 {
+  font-size: 25px;
+  letter-spacing: -.04em;
+}
+
+.pedido-dialog-header > div > p:last-child {
+  max-width: 570px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.pedido-close {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  font-size: 22px;
+}
+
+.pedido-dialog-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 292px;
+  align-items: start;
+  gap: 26px;
+  padding: 25px 32px 32px;
+}
+
+.pedido-edit-loading {
+  grid-column: 1 / -1;
+  min-height: 240px;
+}
+
+.pedido-form-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.pedido-form-section {
+  min-width: 0;
+}
+
+.pedido-section-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+
+.pedido-section-mark {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 29px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--lavender);
+  color: var(--violet-dark);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.pedido-section-mark-products {
+  background: var(--mint);
+  color: var(--mint-ink);
+}
+
+.pedido-section-heading h3 {
+  margin: 1px 0 4px;
+  font-size: 15px;
+}
+
+.pedido-section-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pedido-combobox-wrap {
+  position: relative;
+}
+
+.pedido-combobox-wrap > label,
+.pedido-add-row label,
+.pedido-observations,
+.pedido-date-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #66637a;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pedido-combobox-wrap > input,
+.pedido-add-row input,
+.pedido-observations textarea,
+.pedido-date-field input {
+  width: 100%;
+  border: 1px solid #dedbe8;
+  border-radius: 9px;
+  outline: 0;
+  background: #fff;
+  color: var(--ink);
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.pedido-combobox-wrap > input:focus,
+.pedido-add-row input:focus,
+.pedido-observations textarea:focus,
+.pedido-date-field input:focus {
+  border-color: var(--violet);
+  box-shadow: 0 0 0 3px rgba(102, 89, 217, .12);
+}
+
+.pedido-combobox-wrap > input::placeholder,
+.pedido-observations textarea::placeholder {
+  color: #aaa7b8;
+}
+
+.pedido-suggestions {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 5px);
+  right: 0;
+  left: 0;
+  max-height: 260px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(39, 35, 75, .14);
+  list-style: none;
+}
+
+.pedido-suggestions li {
+  margin: 0;
+  border-radius: 7px;
+}
+
+.pedido-suggestions li[aria-selected="true"] {
+  background: #f5f3ff;
+}
+
+.pedido-suggestions button {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 4px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  padding: 10px;
+  text-align: left;
+}
+
+.pedido-suggestions button:hover,
+.pedido-suggestions button:focus-visible {
+  background: #f5f3ff;
+}
+
+.pedido-suggestions button strong {
+  font-size: 12px;
+}
+
+.pedido-suggestions button > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pedido-product-results {
+  max-height: 300px;
+}
+
+.pedido-option-main,
+.pedido-option-meta {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pedido-option-main > span {
+  color: var(--violet-dark) !important;
+  font-size: 11px !important;
+  font-weight: 800;
+}
+
+.pedido-option-meta {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pedido-field-note {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pedido-inline-error {
+  margin: 8px 0 0;
+  border-radius: 8px;
+  background: #fff0f2;
+  color: #a93651;
+  padding: 9px 11px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.pedido-client-summary {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-top: 11px;
+  border: 1px solid #e6e3f4;
+  border-radius: 10px;
+  background: #faf9ff;
+  padding: 11px 12px;
+}
+
+.pedido-client-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--lavender);
+  color: var(--violet-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.pedido-client-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pedido-client-copy strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pedido-client-copy span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pedido-change-client {
+  flex: 0 0 auto;
+}
+
+.pedido-product-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 124px 178px;
+  align-items: end;
+  gap: 10px;
+}
+
+.pedido-product-picker > .pedido-combobox-wrap {
+  grid-column: 1 / -1;
+}
+
+.pedido-selected-product {
+  display: flex;
+  min-width: 0;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e1eee9;
+  border-radius: 9px;
+  background: #f4fbf8;
+  padding: 10px 12px;
+}
+
+.pedido-selected-product > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pedido-selected-product strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pedido-selected-product span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pedido-selected-product .pedido-current-price {
+  flex: 0 0 auto;
+  color: var(--mint-ink);
+  font-size: 12px;
+}
+
+.pedido-add-row {
+  display: contents;
+}
+
+.pedido-add-row input {
+  min-width: 0;
+}
+
+.pedido-add-button {
+  min-height: 37px;
+  color: var(--violet-dark);
+  white-space: nowrap;
+}
+
+.pedido-add-button span {
+  padding-left: 4px;
+  font-size: 15px;
+}
+
+.pedido-lines-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 24px 0 9px;
+}
+
+.pedido-lines-heading h4,
+.pedido-detail-products h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.pedido-lines-heading > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pedido-lines-table-wrap,
+.pedido-detail-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.pedido-lines-table,
+.pedido-detail-table-wrap table {
+  width: 100%;
+  min-width: 610px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.pedido-lines-table th,
+.pedido-detail-table-wrap th {
+  border-bottom: 1px solid var(--line);
+  background: #faf9fd;
+  color: #918da2;
+  padding: 10px 11px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.pedido-lines-table td,
+.pedido-detail-table-wrap td {
+  border-bottom: 1px solid #f0eef5;
+  color: #5c596f;
+  padding: 10px 11px;
+  font-size: 10px;
+  vertical-align: middle;
+}
+
+.pedido-lines-table tbody tr:last-child td,
+.pedido-detail-table-wrap tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.pedido-line-product {
+  display: flex;
+  min-width: 142px;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pedido-line-product strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.pedido-line-product small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.pedido-line-quantity {
+  width: 74px;
+  border: 1px solid #dedbe8;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  padding: 7px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.pedido-line-quantity[aria-invalid="true"] {
+  border-color: var(--danger);
+  background: #fff7f8;
+}
+
+.pedido-lines-table td > strong {
+  color: var(--ink);
+}
+
+.pedido-remove-line {
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  padding: 5px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.pedido-remove-line:hover {
+  text-decoration: underline;
+}
+
+.pedido-observations {
+  margin-top: 17px;
+}
+
+.pedido-observations > span {
+  color: #a4a0b2;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.pedido-observations textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.pedido-summary {
+  position: sticky;
+  top: 4px;
+  border: 1px solid #e6e3f1;
+  border-radius: 13px;
+  background: #fbfaff;
+  padding: 18px;
+}
+
+.pedido-summary-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pedido-summary-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--lavender);
+  color: var(--violet-dark);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.pedido-summary-heading h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.pedido-summary-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.pedido-date-field {
+  margin-top: 21px;
+}
+
+.pedido-date-field input {
+  padding: 9px 10px;
+}
+
+.pedido-summary-divider {
+  height: 1px;
+  margin: 17px 0 13px;
+  background: #e8e5f1;
+}
+
+.pedido-summary-count,
+.pedido-summary-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pedido-summary-count {
+  color: #77738a;
+  font-size: 11px;
+}
+
+.pedido-summary-count strong {
+  color: var(--ink);
+}
+
+.pedido-summary-total {
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 20px;
+}
+
+.pedido-summary-total span {
+  color: #77738a;
+  font-size: 11px;
+}
+
+.pedido-summary-total strong {
+  color: var(--violet-dark);
+  font-size: 25px;
+  letter-spacing: -.04em;
+}
+
+.pedido-reservation-note {
+  margin: 14px 0 0;
+  border-left: 3px solid #75c9a9;
+  background: #f0faf6;
+  color: #53766a;
+  padding: 9px 10px;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.pedido-submit-error {
+  margin-top: 13px;
+}
+
+.pedido-dialog-actions {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  margin-top: 19px;
+}
+
+.pedido-dialog-actions button {
+  min-height: 39px;
+}
+
+.pedido-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.pedido-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+  margin: 0;
+}
+
+.pedido-detail-facts > div {
+  min-width: 0;
+  border-radius: 9px;
+  background: #faf9fd;
+  padding: 11px;
+}
+
+.pedido-detail-facts dt {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pedido-detail-facts dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pedido-detail-products {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pedido-detail-products > p,
+.pedido-detail-observations p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pedido-detail-table-wrap table {
+  min-width: 650px;
+}
+
+.pedido-detail-observations {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-radius: 9px;
+  background: #faf9fd;
+  padding: 12px;
+}
+
+.pedido-detail-observations strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+@media (max-width: 900px) {
+  .pedido-dialog-content {
+    grid-template-columns: minmax(0, 1fr) 250px;
+    gap: 18px;
+    padding: 22px;
+  }
+
+  .pedido-product-picker {
+    grid-template-columns: minmax(0, 1fr) 105px 160px;
+  }
+}
+
+@media (max-width: 700px) {
+  .pedido-dialog-backdrop {
+    place-items: start center;
+    padding: 10px;
+  }
+
+  .pedido-dialog {
+    max-height: calc(100dvh - 20px);
+    border-radius: 13px;
+  }
+
+  .pedido-dialog-header {
+    padding: 21px 18px 18px;
+  }
+
+  .pedido-dialog-header h2 {
+    font-size: 22px;
+  }
+
+  .pedido-dialog-content {
+    grid-template-columns: 1fr;
+    padding: 19px 18px 22px;
+  }
+
+  .pedido-summary {
+    position: static;
+    grid-row: 1;
+  }
+
+  .pedido-dialog-actions {
+    flex-direction: row;
+  }
+
+  .pedido-dialog-actions button {
+    flex: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .orders-filter {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .orders-filter .filter-select {
+    width: 100%;
+  }
+
+  .pedido-product-picker {
+    grid-template-columns: minmax(0, 1fr) 100px;
+  }
+
+  .pedido-add-button {
+    grid-column: 1 / -1;
+  }
+
+  .pedido-option-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .pedido-client-summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .pedido-change-client {
+    margin-left: 45px;
+  }
+
+  .pedido-detail-facts {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pedido-dialog {
+    animation: none;
+  }
+}
