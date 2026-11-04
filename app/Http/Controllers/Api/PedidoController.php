@@ -7,11 +7,13 @@ use App\Mail\PedidoEnviadoMail;
 use App\Models\Cliente;
 use App\Models\Pedido;
 use App\Models\Producto;
+use App\Models\User;
 use App\Services\AuditoriaService;
 use App\Services\StockService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
@@ -19,19 +21,45 @@ class PedidoController extends Controller
 {
     private const MAX_NUMERIC_10_2_CENTAVOS = 9_999_999_999;
 
+    private const ROL_OPERADOR = 'Operador de Almacén';
+
     public function __construct(
         private StockService $stockService
     ) {}
 
     public function index(Request $request)
     {
+        $usuario = $request->user();
+
         $query = Pedido::with([
             'cliente',
             'detalles.producto',
+            'operador:id,name,username',
         ])->orderByDesc('id_pedido');
+
+        // El operario solo ve los pedidos que tiene asignados y los que
+        // todavía no tienen dueño (para poder tomarlos). Así un pedido no
+        // aparece en la lista de todos los operarios a la vez.
+        if ($usuario && $usuario->rol === self::ROL_OPERADOR) {
+            $query->where(function ($builder) use ($usuario): void {
+                $builder->where('operador_id', $usuario->id)
+                    ->orWhere(function ($sinAsignar): void {
+                        $sinAsignar->whereNull('operador_id')
+                            ->where('estado', 'PENDIENTE');
+                    });
+            });
+        }
 
         if ($request->filled('estado')) {
             $query->where('estado', $request->query('estado'));
+        }
+
+        if ($request->filled('operador_id')) {
+            $query->where('operador_id', $request->integer('operador_id'));
+        }
+
+        if ($request->boolean('sin_asignar')) {
+            $query->whereNull('operador_id');
         }
 
         if ($request->filled('search')) {
@@ -69,6 +97,11 @@ class PedidoController extends Controller
                     'required',
                     'date',
                 ],
+                'operador_id' => [
+                    'nullable',
+                    'integer',
+                    'exists:users,id',
+                ],
                 'observaciones' => [
                     'nullable',
                     'string',
@@ -91,6 +124,10 @@ class PedidoController extends Controller
                     'min:1',
                 ],
             ]);
+
+            if (! empty($datos['operador_id'])) {
+                $this->validarOperador((int) $datos['operador_id']);
+            }
 
             $operacion = 'abrir_transaccion';
 
@@ -153,6 +190,7 @@ class PedidoController extends Controller
                 $operacion = 'insertar_encabezado';
                 $pedido = Pedido::create([
                     'id_cliente' => $datos['id_cliente'],
+                    'operador_id' => $datos['operador_id'] ?? null,
                     'fecha_pedido' => $datos['fecha_pedido'],
                     'estado' => 'PENDIENTE',
                     'total' => 0,
@@ -288,15 +326,216 @@ class PedidoController extends Controller
         ]);
     }
 
-    public function show(Pedido $pedido)
+    public function show(Request $request, Pedido $pedido)
     {
+        $usuario = $request->user();
+
+        if (
+            $usuario &&
+            $usuario->rol === self::ROL_OPERADOR &&
+            $pedido->operador_id !== null &&
+            (int) $pedido->operador_id !== (int) $usuario->id
+        ) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Este pedido está asignado a otro operador.',
+            ], 403);
+        }
+
         return response()->json(
             $pedido->load([
                 'cliente',
                 'detalles.producto',
+                'operador:id,name,username',
                 'movimientos',
             ])
         );
+    }
+
+    /**
+     * Asigna el pedido a un operador de almacén (solo administración).
+     * Enviar "operador_id": null libera la asignación.
+     */
+    public function asignar(Request $request, Pedido $pedido)
+    {
+        $datos = $request->validate([
+            'operador_id' => [
+                'present',
+                'nullable',
+                'integer',
+                'exists:users,id',
+            ],
+        ]);
+
+        if (! empty($datos['operador_id'])) {
+            try {
+                $this->validarOperador((int) $datos['operador_id']);
+            } catch (\InvalidArgumentException $e) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], 422);
+            }
+        }
+
+        $resultado = DB::transaction(function () use ($datos, $pedido) {
+            $pedido = Pedido::where('id_pedido', $pedido->id_pedido)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($pedido->estado !== 'PENDIENTE') {
+                return [
+                    'error' => true,
+                    'status' => 409,
+                    'message' => 'Solo se pueden asignar pedidos pendientes.',
+                ];
+            }
+
+            $pedido->update([
+                'operador_id' => $datos['operador_id'] ?? null,
+            ]);
+
+            app(AuditoriaService::class)->registrar(
+                'ASIGNAR',
+                'PEDIDOS',
+                'Pedido asignado a un operador.',
+                [
+                    'id_pedido' => $pedido->id_pedido,
+                    'operador_id' => $pedido->operador_id,
+                ],
+                request()
+            );
+
+            return [
+                'error' => false,
+                'pedido' => $pedido->refresh()->load([
+                    'cliente',
+                    'detalles.producto',
+                    'operador:id,name,username',
+                ]),
+            ];
+        });
+
+        if ($resultado['error']) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $resultado['message'],
+            ], $resultado['status']);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $resultado['pedido']->operador_id
+                ? 'Pedido asignado correctamente.'
+                : 'Asignación del pedido liberada.',
+            'pedido' => $resultado['pedido'],
+        ]);
+    }
+
+    /**
+     * El operario toma un pedido que todavía no tiene dueño. La actualización
+     * es condicional (operador_id sigue nulo) para que dos operarios no puedan
+     * quedarse con el mismo pedido.
+     */
+    public function tomar(Request $request, Pedido $pedido)
+    {
+        $usuario = $request->user();
+
+        if (! $usuario) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Debes iniciar sesión para tomar un pedido.',
+            ], 401);
+        }
+
+        $resultado = DB::transaction(function () use ($pedido, $usuario) {
+            $pedido = Pedido::where('id_pedido', $pedido->id_pedido)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($pedido->estado !== 'PENDIENTE') {
+                return [
+                    'error' => true,
+                    'status' => 409,
+                    'message' => 'Solo se pueden tomar pedidos pendientes.',
+                ];
+            }
+
+            if ($pedido->operador_id !== null) {
+                if ((int) $pedido->operador_id !== (int) $usuario->id) {
+                    return [
+                        'error' => true,
+                        'status' => 409,
+                        'message' => 'Otro operador ya tomó este pedido.',
+                    ];
+                }
+
+                return [
+                    'error' => false,
+                    'pedido' => $pedido->load([
+                        'cliente',
+                        'detalles.producto',
+                        'operador:id,name,username',
+                    ]),
+                ];
+            }
+
+            $pedido->update([
+                'operador_id' => $usuario->id,
+            ]);
+
+            app(AuditoriaService::class)->registrar(
+                'TOMAR',
+                'PEDIDOS',
+                'Pedido tomado por un operador.',
+                [
+                    'id_pedido' => $pedido->id_pedido,
+                    'operador_id' => $usuario->id,
+                ],
+                request()
+            );
+
+            return [
+                'error' => false,
+                'pedido' => $pedido->refresh()->load([
+                    'cliente',
+                    'detalles.producto',
+                    'operador:id,name,username',
+                ]),
+            ];
+        });
+
+        if ($resultado['error']) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $resultado['message'],
+            ], $resultado['status']);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Pedido asignado a tu usuario. Ya puedes surtirlo.',
+            'pedido' => $resultado['pedido'],
+        ]);
+    }
+
+    private function validarOperador(int $operadorId): User
+    {
+        $operador = User::where('id', $operadorId)->first();
+
+        if (! $operador || $operador->rol !== self::ROL_OPERADOR) {
+            throw new \InvalidArgumentException(
+                'El usuario seleccionado no es un operador de almacén.'
+            );
+        }
+
+        if (! $operador->activo) {
+            throw new \InvalidArgumentException(
+                'El operador seleccionado está inactivo.'
+            );
+        }
+
+        return $operador;
     }
 
     public function update(
@@ -563,19 +802,60 @@ class PedidoController extends Controller
         );
     }
 
-    public function surtir(Pedido $pedido)
+    public function surtir(Request $request, Pedido $pedido)
     {
+        // Confirmación de identidad (step-up): evita que alguien con la
+        // tablet desbloqueada surta pedidos ajenos.
+        $datos = $request->validate([
+            'password' => ['required', 'string'],
+        ]);
+
+        $usuario = $request->user();
+
+        if (! $usuario || ! Hash::check($datos['password'], $usuario->password)) {
+            app(AuditoriaService::class)->registrar(
+                'SURTIM_DENEGADO',
+                'PEDIDOS',
+                'Intento de surtido sin confirmación de contraseña.',
+                ['id_pedido' => $pedido->id_pedido],
+                $request
+            );
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Confirma tu contraseña para autorizar el surtido.',
+            ], 422);
+        }
+
         try {
-            $pedido = DB::transaction(function () use ($pedido) {
+            $pedido = DB::transaction(function () use ($request, $pedido) {
                 $pedido = Pedido::where('id_pedido', $pedido->id_pedido)
                     ->lockForUpdate()
                     ->firstOrFail();
+
+                $usuario = $request->user();
+
+                if (
+                    $pedido->operador_id !== null &&
+                    (int) $pedido->operador_id !== (int) ($usuario?->id ?? 0)
+                ) {
+                    throw new \InvalidArgumentException(
+                        'Este pedido está asignado a otro operador. No puedes surtirlo.'
+                    );
+                }
+
+                if ($pedido->operador_id === null && $usuario) {
+                    $pedido->update([
+                        'operador_id' => $usuario->id,
+                    ]);
+                }
 
                 $this->stockService->surtir($pedido);
 
                 $pedido = $pedido->refresh()->load([
                     'cliente',
                     'detalles.producto',
+                    'operador:id,name,username',
                     'movimientos',
                 ]);
 

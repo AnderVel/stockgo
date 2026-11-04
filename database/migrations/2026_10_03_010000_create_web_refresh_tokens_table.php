@@ -8,6 +8,12 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // La tabla ya existe en entornos donde la migración se ejecutó
+        // sin registrar la línea en `migrations`; el guard evita el 42P07.
+        if (Schema::hasTable('web_refresh_tokens')) {
+            return;
+        }
+
         Schema::create('web_refresh_tokens', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('user_id');

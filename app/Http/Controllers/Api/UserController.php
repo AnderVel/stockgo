@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Bodega;
 use App\Models\User;
 use App\Models\WebRefreshToken;
 use App\Services\AuditoriaService;
@@ -36,6 +37,7 @@ class UserController extends Controller
             'email',
             'rol',
             'activo',
+            'bodega_id',
             'bodega_asignada',
             'two_factor_enabled',
             'created_at',
@@ -58,8 +60,11 @@ class UserController extends Controller
             'email' => 'required|email|max:255|unique:users,email',
             'password' => 'required|string|min:12|max:255',
             'rol' => 'required|string|in:Administrador,Administrador Regular,Operador de Almacén',
-            'bodega_asignada' => 'required|string|max:255',
+            'bodega_id' => 'nullable|integer|exists:bodegas,id',
+            'bodega_asignada' => 'nullable|string|max:255',
         ]);
+
+        $this->sincronizarBodega($datos);
 
         // Validar política de contraseñas
         $erroresPassword = app(PasswordPolicyService::class)->validar(
@@ -82,13 +87,40 @@ class UserController extends Controller
             'email' => $datos['email'] ?? null,
             'password' => Hash::make($datos['password']),
             'rol' => $datos['rol'],
-            'bodega_asignada' => $datos['bodega_asignada'],
+            'bodega_id' => $datos['bodega_id'] ?? null,
+            'bodega_asignada' => $datos['bodega_asignada'] ?? null,
             'activo' => true,
         ]);
 
         app(AuditoriaService::class)->registrar('CREAR', 'USUARIOS', 'Usuario creado.', ['id' => $user->id], $request);
 
-        return response()->json($user->only(['id', 'name', 'username', 'email', 'rol', 'activo', 'bodega_asignada']), 201);
+        return response()->json($user->only(['id', 'name', 'username', 'email', 'rol', 'activo', 'bodega_id', 'bodega_asignada']), 201);
+    }
+
+    /**
+     * Mantiene coherentes bodega_id (referencia real) y bodega_asignada
+     * (texto visible heredado): si llega el id se sincroniza el nombre;
+     * si solo llega el texto, se vincula la bodega existente con ese nombre.
+     */
+    private function sincronizarBodega(array &$datos): void
+    {
+        if (! empty($datos['bodega_id'])) {
+            $bodega = Bodega::find($datos['bodega_id']);
+
+            if ($bodega) {
+                $datos['bodega_asignada'] = $bodega->nombre;
+            }
+
+            return;
+        }
+
+        if (! empty($datos['bodega_asignada'])) {
+            $bodega = Bodega::whereRaw('LOWER(nombre) = ?', [
+                mb_strtolower(trim($datos['bodega_asignada'])),
+            ])->first();
+
+            $datos['bodega_id'] = $bodega?->id;
+        }
     }
 
     public function update(Request $request, User $user)
@@ -97,8 +129,11 @@ class UserController extends Controller
             'name' => 'required|string|max:255',
             'rol' => 'required|string|in:Administrador,Administrador Regular,Operador de Almacén',
             'activo' => 'required|boolean',
-            'bodega_asignada' => 'required|string|max:255',
+            'bodega_id' => 'nullable|integer|exists:bodegas,id',
+            'bodega_asignada' => 'nullable|string|max:255',
         ]);
+
+        $this->sincronizarBodega($datos);
 
         if (
             $request->user()?->is($user)
@@ -131,7 +166,8 @@ class UserController extends Controller
             'name' => $datos['name'],
             'rol' => $datos['rol'],
             'activo' => $datos['activo'],
-            'bodega_asignada' => $datos['bodega_asignada'],
+            'bodega_id' => $datos['bodega_id'] ?? $user->bodega_id,
+            'bodega_asignada' => $datos['bodega_asignada'] ?? $user->bodega_asignada,
         ]);
 
         // Revocar refresh tokens web si cambió el rol o se desactivó el usuario

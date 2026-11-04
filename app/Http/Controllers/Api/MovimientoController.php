@@ -23,6 +23,7 @@ class MovimientoController extends Controller
             'producto',
             'pedido',
             'proveedor',
+            'usuario:id,name,username',
         ])->orderByDesc('id_movimiento');
 
         if ($request->filled('tipo')) {
@@ -102,12 +103,15 @@ class MovimientoController extends Controller
             ], 500);
         }
 
+        $productoNombre = $movimiento->producto?->nombre ?? ('#'.$datos['id_producto']);
+
         app(AuditoriaService::class)->registrar(
-            'CREAR',
-            'MOVIMIENTOS',
-            'Entrada de mercancía registrada.',
+            'ENTRADA',
+            'INVENTARIO',
+            "Recepción de {$productoNombre}: +{$datos['cantidad']} uds.",
             [
                 'id_producto' => $datos['id_producto'],
+                'producto' => $productoNombre,
                 'cantidad' => $datos['cantidad'],
                 'id_proveedor' => $datos['id_proveedor'] ?? null,
             ],
@@ -164,12 +168,15 @@ class MovimientoController extends Controller
             ], 500);
         }
 
+        $productoNombre = $movimiento->producto?->nombre ?? ('#'.$datos['id_producto']);
+
         app(AuditoriaService::class)->registrar(
-            'CREAR',
-            'MOVIMIENTOS',
-            'Salida de mercancía registrada.',
+            'SALIDA',
+            'INVENTARIO',
+            "Salida de {$productoNombre}: -{$datos['cantidad']} uds.",
             [
                 'id_producto' => $datos['id_producto'],
+                'producto' => $productoNombre,
                 'cantidad' => $datos['cantidad'],
                 'id_pedido' => $datos['id_pedido'] ?? null,
             ],
@@ -225,9 +232,9 @@ class MovimientoController extends Controller
         }
 
         app(AuditoriaService::class)->registrar(
-            'CREAR',
-            'MOVIMIENTOS',
-            'Ajuste de inventario registrado.',
+            'AJUSTE',
+            'INVENTARIO',
+            'Ajuste de inventario: '.($movimiento->producto?->nombre ?? ('#'.$datos['id_producto']))." ({$datos['cantidad']} uds) — {$datos['motivo']}",
             [
                 'id_producto' => $datos['id_producto'],
                 'cantidad' => $datos['cantidad'],
@@ -292,10 +299,13 @@ class MovimientoController extends Controller
             ], 422);
         }
 
+        $esRecepcion = $datos['tipo_movimiento'] === 'recepcion';
+
         app(AuditoriaService::class)->registrar(
-            'CREAR',
+            $esRecepcion ? 'RECEPCION' : 'PICKING',
             'INVENTARIO',
-            'Movimiento registrado desde dispositivo.',
+            ($esRecepcion ? 'Recepción' : 'Picking').' desde dispositivo: '
+                .$datos['codigo_barras']." ({$datos['cantidad']} uds)",
             [
                 'codigo_barras' => $datos['codigo_barras'],
                 'tipo_movimiento' => $datos['tipo_movimiento'],
@@ -361,12 +371,17 @@ class MovimientoController extends Controller
             ], 422);
         }
 
+        $esEntrada = $datos['tipo'] === 'entrada';
+
         app(AuditoriaService::class)->registrar(
-            'CREAR',
+            $esEntrada ? 'ENTRADA' : 'SALIDA',
             'INVENTARIO',
-            'Movimiento registrado desde Android.',
+            ($esEntrada ? 'Recepción' : 'Salida')." de {$producto->nombre}: "
+                .($esEntrada ? '+' : '-').$datos['cantidad'].' uds'
+                .(isset($datos['pedido_id']) ? " (pedido #{$datos['pedido_id']})" : ''),
             [
                 'id_producto' => $producto->id_producto,
+                'producto' => $producto->nombre,
                 'tipo' => $datos['tipo'],
                 'cantidad' => $datos['cantidad'],
                 'pedido_id' => $datos['pedido_id'] ?? null,
@@ -440,11 +455,12 @@ class MovimientoController extends Controller
         $producto->refresh();
 
         app(AuditoriaService::class)->registrar(
-            'CREAR',
-            'MOVIMIENTOS',
-            'Entrada de mercancía registrada.',
+            'ENTRADA',
+            'INVENTARIO',
+            "Recepción de {$producto->nombre}: +{$movimiento->cantidad} uds.",
             [
                 'id_producto' => $producto->id_producto,
+                'producto' => $producto->nombre,
                 'cantidad' => $movimiento->cantidad,
                 'id_proveedor' => $movimiento->id_proveedor ?? null,
             ],

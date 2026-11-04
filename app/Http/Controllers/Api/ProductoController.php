@@ -10,9 +10,29 @@ use Illuminate\Validation\Rule;
 
 class ProductoController extends Controller
 {
+    private const ROL_OPERADOR = 'Operador de Almacén';
+
+    /**
+     * Si el usuario es operador con bodega asignada, limita la consulta
+     * a los productos de esa bodega (y a los aún sin bodega, para no
+     * esconder datos heredados).
+     */
+    private function aplicarFiltroBodega($query, Request $request): void
+    {
+        $usuario = $request->user();
+
+        if ($usuario && $usuario->rol === self::ROL_OPERADOR && $usuario->bodega_id) {
+            $query->where('productos.bodega_id', $usuario->bodega_id);
+        }
+    }
+
     public function index(Request $request)
     {
-        $query = Producto::query()->orderBy('id_producto');
+        $query = Producto::query()
+            ->with('bodega:id,nombre,descripcion')
+            ->orderBy('id_producto');
+
+        $this->aplicarFiltroBodega($query, $request);
 
         if ($request->filled('search')) {
             $search = $request->query('search');
@@ -32,12 +52,11 @@ class ProductoController extends Controller
         return response()->json($query->get());
     }
 
-    public function buscarPorCodigo($codigo)
+    public function buscarPorCodigo(Request $request, $codigo)
     {
-        $producto = Producto::where(
-            'codigo_barras',
-            $codigo
-        )->first();
+        $producto = Producto::query()
+            ->where('codigo_barras', $codigo)
+            ->first();
 
         if (! $producto) {
             return response()->json([
@@ -45,18 +64,42 @@ class ProductoController extends Controller
             ], 404);
         }
 
+        // Un operador solo puede operar productos de su bodega.
+        $usuario = $request->user();
+
+        if (
+            $usuario
+            && $usuario->rol === self::ROL_OPERADOR
+            && $usuario->bodega_id
+            && $producto->bodega_id !== null
+            && (int) $producto->bodega_id !== (int) $usuario->bodega_id
+        ) {
+            return response()->json([
+                'mensaje' => 'El producto no pertenece a tu bodega asignada.',
+            ], 403);
+        }
+
         $stockDisponible =
             $producto->stock_fisico -
             $producto->stock_reservado;
 
+        // La app móvil necesita `id_producto` para registrar recepción/picking
+        // y `stock_reservado` para mostrar el desglose completo del stock.
         return response()->json([
+            'id_producto' => $producto->id_producto,
             'codigo_barras' => $producto->codigo_barras,
             'nombre' => $producto->nombre,
             'precio' => (float) $producto->precio,
             'unidad_medida' => $producto->unidad_medida,
-            'stock_fisico' => $producto->stock_fisico,
-            'stock_disponible' => $stockDisponible,
+            'stock_fisico' => (int) $producto->stock_fisico,
+            'stock_reservado' => (int) $producto->stock_reservado,
+            'stock_disponible' => (int) $stockDisponible,
             'ubicacion' => $producto->ubicacion,
+            'bodega' => $producto->bodega ? [
+                'id' => $producto->bodega->id,
+                'nombre' => $producto->bodega->nombre,
+                'descripcion' => $producto->bodega->descripcion,
+            ] : null,
             'estado' => $producto->estado,
         ]);
     }
@@ -79,6 +122,8 @@ class ProductoController extends Controller
             'estado' => 'required|string|max:50',
 
             'ubicacion' => 'nullable|string|max:255',
+
+            'bodega_id' => 'nullable|integer|exists:bodegas,id',
         ]);
 
         $stockFisico = (int) ($datos['stock_fisico'] ?? 0);
@@ -112,7 +157,7 @@ class ProductoController extends Controller
     public function show(Producto $producto)
     {
         return response()->json(
-            $producto->load('movimientos')
+            $producto->load(['movimientos', 'bodega:id,nombre,descripcion'])
         );
     }
 
@@ -142,6 +187,8 @@ class ProductoController extends Controller
             'estado' => 'required|string|max:50',
 
             'ubicacion' => 'nullable|string|max:255',
+
+            'bodega_id' => 'nullable|integer|exists:bodegas,id',
         ]);
 
         $producto->update($datos);

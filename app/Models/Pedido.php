@@ -14,6 +14,7 @@ class Pedido extends Model
 
     protected $fillable = [
         'id_cliente',
+        'operador_id',
         'fecha_pedido',
         'estado',
         'total',
@@ -31,6 +32,15 @@ class Pedido extends Model
             Cliente::class,
             'id_cliente',
             'id_cliente'
+        );
+    }
+
+    public function operador(): BelongsTo
+    {
+        return $this->belongsTo(
+            User::class,
+            'operador_id',
+            'id'
         );
     }
 

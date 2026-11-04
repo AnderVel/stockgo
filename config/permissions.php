@@ -32,6 +32,7 @@ return [
             'orders.view',
             'orders.create',
             'orders.update',
+            'orders.asignar',
             'orders.surtir',
             'orders.entregar',
             'orders.receive',

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api } from '../api/client'
-import { clientService, orderService, productService, type PageResponse } from '../api/services'
+import { clientService, orderService, productService, userService, type PageResponse } from '../api/services'
 import { DataTable, EmptyState, ErrorState, formatCurrency, formatDate, LoadingState, PageHeader, Pagination, StatusBadge } from '../components/ui'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
@@ -44,9 +44,22 @@ type DetallePedido = {
   producto?: ProductoCatalogo
 }
 
+type OperadorAsignado = {
+  id: number
+  name: string
+  username: string
+}
+
+type OperadorOpcion = OperadorAsignado & {
+  rol: string
+  activo: boolean
+}
+
 type Pedido = {
   id_pedido: number
   id_cliente: number
+  operador_id: number | null
+  operador?: OperadorAsignado | null
   fecha_pedido: string | null
   estado: string
   total: number | string
@@ -99,6 +112,11 @@ export default function Pedidos() {
   const [enviarPedido, setEnviarPedido] = useState<Pedido | null>(null)
   const [correoEnviar, setCorreoEnviar] = useState('')
   const [enviarError, setEnviarError] = useState<string | null>(null)
+  const [asignarPedido, setAsignarPedido] = useState<Pedido | null>(null)
+  const [operadores, setOperadores] = useState<OperadorOpcion[]>([])
+  const [operadorSeleccionado, setOperadorSeleccionado] = useState('')
+  const [operadoresLoading, setOperadoresLoading] = useState(false)
+  const [operadoresError, setOperadoresError] = useState<string | null>(null)
   const [clientQuery, setClientQuery] = useState('')
   const [clientResults, setClientResults] = useState<ClientePedido[]>([])
   const [clientLoading, setClientLoading] = useState(false)
@@ -475,6 +493,50 @@ export default function Pedidos() {
 
     if (wasCancelled) {
       setPedidoParaCancelar(null)
+    }
+  }
+
+  const openAsignar = async (row: Pedido) => {
+    setAsignarPedido(row)
+    setOperadorSeleccionado(row.operador_id ? String(row.operador_id) : '')
+    setOperadoresError(null)
+    setOperadoresLoading(true)
+
+    try {
+      const response = await userService.list({ per_page: 50 })
+
+      const lista = (rowsFrom(response) as OperadorOpcion[])
+        .filter((usuario) => usuario.rol === 'Operador de Almacén' && usuario.activo !== false)
+        .map((usuario) => ({ ...usuario, id: Number(usuario.id) }))
+
+      setOperadores(lista)
+    } catch (caught) {
+      setOperadoresError(caught instanceof Error ? caught.message : 'No fue posible cargar los operadores.')
+    } finally {
+      setOperadoresLoading(false)
+    }
+  }
+
+  const confirmarAsignacion = async () => {
+    if (!asignarPedido) {
+      return
+    }
+
+    const idPedido = asignarPedido.id_pedido
+    const operadorId = operadorSeleccionado ? Number(operadorSeleccionado) : null
+
+    const wasAssigned = await act(
+      idPedido,
+      () => orderService.asignar(idPedido, operadorId),
+      operadorId ? 'Pedido asignado al operador.' : 'Asignación del pedido liberada.',
+    )
+
+    if (wasAssigned) {
+      setAsignarPedido(null)
+
+      if (showDetail && detailPedido?.id_pedido === idPedido) {
+        void viewDetail(idPedido)
+      }
     }
   }
 
@@ -880,6 +942,11 @@ export default function Pedidos() {
               },
               { key: 'fecha_pedido', label: 'Fecha', render: (row: Pedido) => formatDate(row.fecha_pedido) },
               { key: 'total', label: 'Total', render: (row: Pedido) => formatCurrency(row.total) },
+              {
+                key: 'operador',
+                label: 'Operador',
+                render: (row: Pedido) => row.operador?.name || row.operador?.username || 'Sin asignar',
+              },
               { key: 'estado', label: 'Estado', render: (row: Pedido) => <StatusBadge estado={row.estado} /> },
               {
                 key: 'actions',
@@ -891,6 +958,14 @@ export default function Pedidos() {
                     </button>
                     {row.estado === 'PENDIENTE' && (
                       <>
+                        <button
+                          type="button"
+                          className="button-quiet"
+                          disabled={busy === row.id_pedido}
+                          onClick={() => void openAsignar(row)}
+                        >
+                          Asignar
+                        </button>
                         <button
                           type="button"
                           className="button-quiet"
@@ -1360,6 +1435,65 @@ export default function Pedidos() {
       </Modal>
 
       <Modal
+        open={!!asignarPedido}
+        title={asignarPedido ? `Asignar pedido #${asignarPedido.id_pedido}` : 'Asignar pedido'}
+        onClose={() => {
+          if (busy !== asignarPedido?.id_pedido) {
+            setAsignarPedido(null)
+          }
+        }}
+        busy={busy === asignarPedido?.id_pedido}
+      >
+        <div className="confirm-copy">
+          <p>Elige al operador de almacén responsable de surtir este pedido.</p>
+          <small>
+            Solo el operador asignado podrá surtirlo desde la aplicación. Si lo dejas sin asignar,
+            cualquier operario podrá tomarlo; el primero que lo tome se queda con él.
+          </small>
+        </div>
+
+        <label className="pedido-observations" htmlFor="operador-asignado">
+          Operador de almacén
+          <select
+            id="operador-asignado"
+            className="filter-select"
+            value={operadorSeleccionado}
+            onChange={(event) => setOperadorSeleccionado(event.target.value)}
+            disabled={operadoresLoading || busy === asignarPedido?.id_pedido}
+          >
+            <option value="">Sin asignar</option>
+            {operadores.map((operador) => (
+              <option key={operador.id} value={operador.id}>
+                {operador.name || operador.username}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {operadoresLoading && <small>Cargando operadores…</small>}
+        {operadoresError && <small role="alert">{operadoresError}</small>}
+
+        <div className="modal-footer">
+          <button
+            type="button"
+            className="button-secondary"
+            disabled={busy === asignarPedido?.id_pedido}
+            onClick={() => setAsignarPedido(null)}
+          >
+            Volver
+          </button>
+          <button
+            type="button"
+            className="button-primary"
+            disabled={busy === asignarPedido?.id_pedido}
+            onClick={() => void confirmarAsignacion()}
+          >
+            {busy === asignarPedido?.id_pedido ? 'Guardando…' : 'Guardar asignación'}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
         open={!!enviarPedido}
         title={enviarPedido ? `Enviar pedido #${enviarPedido.id_pedido}` : 'Enviar pedido'}
         onClose={closeEnviar}
@@ -1491,6 +1625,7 @@ function OrderDetail({ pedido }: { pedido: Pedido }) {
         <div><dt>Cliente</dt><dd>{pedido.cliente?.nombre || `#${pedido.id_cliente}`}</dd></div>
         <div><dt>Fecha</dt><dd>{formatDate(pedido.fecha_pedido)}</dd></div>
         <div><dt>Estado</dt><dd><StatusBadge estado={pedido.estado} /></dd></div>
+        <div><dt>Operador</dt><dd>{pedido.operador?.name || pedido.operador?.username || 'Sin asignar'}</dd></div>
         <div><dt>Total</dt><dd>{formatCurrency(pedido.total)}</dd></div>
       </dl>
       <div className="pedido-detail-products">

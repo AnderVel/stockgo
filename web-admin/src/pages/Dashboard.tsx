@@ -51,7 +51,7 @@ export default function Dashboard() {
                       ) : (
                         <span className={`activity-icon activity-${String(movement.tipo).toLowerCase()}`} aria-hidden="true">{movement.tipo === 'ENTRADA' ? '+' : '−'}</span>
                       )}
-                      <div className="activity-main"><div className="activity-title"><strong>{movement.titulo || 'Movimiento de inventario'}</strong><StatusBadge estado={esPedido ? (etiquetaPedido[movement.tipo] ?? 'PENDIENTE') : movement.tipo} /></div><span>{movement.producto || (esPedido ? 'Gestión de pedidos' : `Producto #${movement.id_producto}`)}</span><small>{formatDate(movement.created_at)}</small></div>
+                      <div className="activity-main"><div className="activity-title"><strong>{movement.titulo || 'Movimiento de inventario'}</strong><StatusBadge estado={esPedido ? (etiquetaPedido[movement.tipo] ?? 'PENDIENTE') : movement.tipo} /></div><span>{[movement.producto || (esPedido ? 'Gestión de pedidos' : `Producto #${movement.id_producto}`), movement.usuario ? `por ${movement.usuario}` : null].filter(Boolean).join(' · ')}</span><small>{formatDate(movement.created_at)}</small></div>
                       {!esPedido && <strong className={movement.tipo === 'ENTRADA' ? 'quantity-positive' : 'quantity-negative'}>{movement.tipo === 'ENTRADA' ? '+' : '−'}{movement.cantidad}</strong>}
                     </article>
                   )

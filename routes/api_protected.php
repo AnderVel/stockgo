@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuditoriaController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BodegaController;
 use App\Http\Controllers\Api\ClienteController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\InventarioController;
@@ -164,6 +165,33 @@ Route::get(
     [InventarioController::class, 'porUbicacion']
 )->middleware('permission:inventory.view');
 
+Route::get(
+    '/inventario/por-bodega',
+    [InventarioController::class, 'porBodega']
+)->middleware('permission:inventory.view');
+
+// BODEGAS
+
+Route::get(
+    '/bodegas',
+    [BodegaController::class, 'index']
+)->middleware('permission:products.view');
+
+Route::post(
+    '/bodegas',
+    [BodegaController::class, 'store']
+)->middleware('permission:products.create');
+
+Route::put(
+    '/bodegas/{bodega}',
+    [BodegaController::class, 'update']
+)->middleware('permission:products.update');
+
+Route::delete(
+    '/bodegas/{bodega}',
+    [BodegaController::class, 'destroy']
+)->middleware('permission:products.delete');
+
 // PEDIDOS
 
 Route::get(
@@ -199,6 +227,16 @@ Route::delete(
 Route::post(
     '/pedidos/{pedido}/surtir',
     [PedidoController::class, 'surtir']
+)->middleware('permission:orders.surtir');
+
+Route::post(
+    '/pedidos/{pedido}/asignar',
+    [PedidoController::class, 'asignar']
+)->middleware('permission:orders.asignar');
+
+Route::post(
+    '/pedidos/{pedido}/tomar',
+    [PedidoController::class, 'tomar']
 )->middleware('permission:orders.surtir');
 
 Route::post(

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Bodega;
 use App\Models\Movimiento;
 use App\Models\Producto;
 use Carbon\Carbon;
@@ -12,6 +13,23 @@ use Illuminate\Support\Facades\Auth;
 
 class InventarioController extends Controller
 {
+    private const ROL_OPERADOR = 'Operador de Almacén';
+
+    /**
+     * Un operador con bodega asignada solo ve productos de su bodega
+     * (y los aún sin asignar). El administrador ve todo.
+     */
+    private function scopeBodega($query)
+    {
+        $usuario = Auth::user();
+
+        if ($usuario && $usuario->rol === self::ROL_OPERADOR && $usuario->bodega_id) {
+            $query->where('bodega_id', $usuario->bodega_id);
+        }
+
+        return $query;
+    }
+
     /**
      * Resumen general del inventario para la pantalla general.
      * GET /api/inventario/resumen
@@ -19,21 +37,26 @@ class InventarioController extends Controller
     public function resumen(): JsonResponse
     {
         // Productos activos: estado ACTIVO
-        $productosActivos = Producto::where('estado', 'ACTIVO')->count();
+        $productosActivos = $this->scopeBodega(
+            Producto::query()->where('estado', 'ACTIVO')
+        )->count();
 
         // Unidades totales: stock_fisico total (unidades almacenadas físicamente)
-        $unidadesTotales = Producto::where('estado', 'ACTIVO')->sum('stock_fisico');
+        $unidadesTotales = $this->scopeBodega(
+            Producto::query()->where('estado', 'ACTIVO')
+        )->sum('stock_fisico');
 
         // Valor aproximado: sumar stock_fisico * precio para productos activos
-        // Nota: precio es precio de venta, no necesariamente costo. No hay campo de costo en el modelo.
-        $valorAproximado = Producto::where('estado', 'ACTIVO')
-            ->selectRaw('COALESCE(SUM(stock_fisico * precio), 0) as total')
+        // Nota: precio es precio de venta, no necesariamente costo.
+        $valorAproximado = $this->scopeBodega(
+            Producto::query()->where('estado', 'ACTIVO')
+        )->selectRaw('COALESCE(SUM(stock_fisico * precio), 0) as total')
             ->value('total');
 
         // Alertas de stock: productos activos con stock_disponible <= 5 (umbral hardcodeado como en Dashboard)
-        $alertasStock = Producto::where('estado', 'ACTIVO')
-            ->whereRaw('stock_disponible <= 5')
-            ->count();
+        $alertasStock = $this->scopeBodega(
+            Producto::query()->where('estado', 'ACTIVO')->whereRaw('stock_disponible <= 5')
+        )->count();
 
         // Última actualización: fecha más reciente de movimientos o productos
         $ultimaMovimiento = Movimiento::max('created_at');
@@ -77,7 +100,7 @@ class InventarioController extends Controller
             ->where('estado', 'ACTIVO')
             ->whereRaw('stock_disponible <= 5'); // Umbral hardcodeado como en Dashboard
 
-        $productos = $query->get();
+        $productos = $this->scopeBodega($query)->get();
 
         $data = $productos->map(function ($producto) {
             return [
@@ -102,7 +125,9 @@ class InventarioController extends Controller
      */
     public function porUbicacion(): JsonResponse
     {
-        $productos = Producto::where('estado', 'ACTIVO')->get();
+        $productos = $this->scopeBodega(
+            Producto::query()->where('estado', 'ACTIVO')
+        )->get();
 
         // Agrupar por ubicación (incluyendo null/empty como 'Sin ubicación')
         $grupos = $productos->groupBy(function ($producto) {
@@ -178,6 +203,60 @@ class InventarioController extends Controller
                 'fecha' => $movimiento->created_at?->format('Y-m-d H:i:s'),
             ];
         })->values();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * Inventario agrupado por bodega (vista de administración).
+     * GET /api/inventario/por-bodega
+     * Incluye también los productos aún sin bodega asignada.
+     */
+    public function porBodega(): JsonResponse
+    {
+        $bodegas = Bodega::query()->orderBy('nombre')->get();
+
+        $productos = Producto::query()
+            ->where('estado', 'ACTIVO')
+            ->get(['id_producto', 'nombre', 'codigo_barras', 'stock_fisico', 'stock_reservado', 'stock_disponible', 'ubicacion', 'bodega_id']);
+
+        $porBodega = $productos->groupBy(
+            fn ($p) => $p->bodega_id ?? 0
+        );
+
+        $data = $bodegas->map(function (Bodega $bodega) use ($porBodega): array {
+            $grupo = $porBodega->get($bodega->id, collect());
+
+            return [
+                'id' => $bodega->id,
+                'nombre' => $bodega->nombre,
+                'descripcion' => $bodega->descripcion,
+                'total_productos' => $grupo->count(),
+                'total_unidades' => (int) $grupo->sum('stock_fisico'),
+                'alertas' => $grupo->filter(
+                    fn ($p) => (int) $p->stock_disponible <= 5
+                )->count(),
+            ];
+        })->values();
+
+        // Productos sin bodega asignada (avisar al admin para reubicarlos)
+        $sinAsignar = $porBodega->get(0, collect());
+
+        if ($sinAsignar->isNotEmpty()) {
+            $data->push([
+                'id' => null,
+                'nombre' => 'Sin bodega asignada',
+                'descripcion' => 'Productos pendientes de ubicación; asínjalos desde Productos.',
+                'total_productos' => $sinAsignar->count(),
+                'total_unidades' => (int) $sinAsignar->sum('stock_fisico'),
+                'alertas' => $sinAsignar->filter(
+                    fn ($p) => (int) $p->stock_disponible <= 5
+                )->count(),
+            ]);
+        }
 
         return response()->json([
             'status' => 'success',

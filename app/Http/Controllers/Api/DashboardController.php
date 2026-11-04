@@ -41,9 +41,13 @@ class DashboardController extends Controller
                 'motivo',
                 'stock_anterior',
                 'stock_nuevo',
+                'usuario_id',
                 'created_at',
             ])
-            ->with('producto:id_producto,nombre,codigo_barras')
+            ->with([
+                'producto:id_producto,nombre,codigo_barras',
+                'usuario:id,name,username',
+            ])
             ->latest('id_movimiento')
             ->limit(10)
             ->get();
@@ -51,6 +55,7 @@ class DashboardController extends Controller
         $eventosPedidos = Auditoria::query()
             ->where('modulo', 'PEDIDOS')
             ->whereIn('accion', ['CREAR', 'SURTIR', 'ENTREGAR', 'RECIBIR', 'CANCELAR'])
+            ->with('usuario:id,name,username')
             ->latest('id_auditoria')
             ->limit(10)
             ->get();
@@ -63,6 +68,7 @@ class DashboardController extends Controller
             'cantidad' => (int) $movimiento->cantidad,
             'producto' => $movimiento->producto?->nombre,
             'id_producto' => $movimiento->id_producto,
+            'usuario' => $movimiento->usuario?->username ?? 'Sistema',
             'created_at' => $movimiento->created_at?->toIso8601String(),
         ]);
 
@@ -95,6 +101,7 @@ class DashboardController extends Controller
                 'cantidad' => null,
                 'producto' => null,
                 'id_producto' => null,
+                'usuario' => $auditoria->usuario?->username ?? 'Sistema',
                 'created_at' => $auditoria->created_at?->toIso8601String(),
             ];
         });
@@ -115,7 +122,9 @@ class DashboardController extends Controller
                 'entradas' => (int) ($movimientosPorTipo['ENTRADA'] ?? 0),
                 'salidas' => (int) ($movimientosPorTipo['SALIDA'] ?? 0),
             ],
-            'pedidos_por_estado' => $pedidosPorEstado,
+            // Se castea a objeto: un mapa vacío debe serializarse como {}
+            // y no como [], para que el cliente lo lea como diccionario.
+            'pedidos_por_estado' => (object) $pedidosPorEstado->toArray(),
             'movimientos_recientes' => $actividad,
         ]);
     }

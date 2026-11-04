@@ -53,15 +53,24 @@ export const productService = {
 
 export const inventoryService = {
   movements: (params: ListParams = {}) => api<PageResponse<any>>(`/movimientos${listQuery(params)}`),
+  porBodega: () => api<{ status: string; data: any[] }>('/inventario/por-bodega'),
   entrada: (data: any) => api('/movimientos/entrada', { method: 'POST', body: JSON.stringify(data) }),
   salida: (data: any) => api('/movimientos/salida', { method: 'POST', body: JSON.stringify(data) }),
   ajuste: (data: any) => api('/movimientos/ajuste', { method: 'POST', body: JSON.stringify(data) }),
+}
+
+export const bodegaService = {
+  list: () => api<any[]>('/bodegas'),
+  create: (data: any) => api('/bodegas', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: any) => api(`/bodegas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  remove: (id: number) => api(`/bodegas/${id}`, { method: 'DELETE' }),
 }
 
 export const orderService = {
   list: (params: ListParams = {}) => api<PageResponse<any>>(`/pedidos${listQuery(params)}`),
   get: (id: number) => api(`/pedidos/${id}`),
   create: (data: any) => api('/pedidos', { method: 'POST', body: JSON.stringify(data) }),
+  asignar: (id: number, operadorId: number | null) => api(`/pedidos/${id}/asignar`, { method: 'POST', body: JSON.stringify({ operador_id: operadorId }) }),
   cancel: (id: number) => api(`/pedidos/${id}/cancelar`, { method: 'POST' }),
   surtir: (id: number) => api(`/pedidos/${id}/surtir`, { method: 'POST' }),
   entregar: (id: number, correo: string) => api(`/pedidos/${id}/entregar`, { method: 'POST', body: JSON.stringify({ correo }) }),

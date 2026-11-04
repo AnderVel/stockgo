@@ -51,23 +51,27 @@ class CheckPermission
 
         $response = $next($request);
 
-        if ($request->isMethod('GET')) {
-            return $response;
-        }
+        // La auditoría de la operación real la registran los propios
+        // controladores (CREAR/ENTRADA/SURTIR/...). Aquí solo se anotan
+        // los fallos (4xx/5xx) distintos del "sin permiso" ya registrado,
+        // para no duplicar filas "PERMITIDO / Operación autorizada".
+        $status = $response->getStatusCode();
 
-        app(AuditoriaService::class)->registrar(
-            'PERMITIDO',
-            $this->modulo($request),
-            'Operación autorizada.',
-            [
-                'permiso' => $permission,
-                'metodo' => $request->method(),
-                'ruta' => $request->path(),
-                'rol' => $user?->rol,
-                'status' => $response->getStatusCode(),
-            ],
-            $request
-        );
+        if ($status >= 400 && $status !== 403) {
+            app(AuditoriaService::class)->registrar(
+                'FALLO',
+                $this->modulo($request),
+                'Operación rechazada ('.$status.').',
+                [
+                    'permiso' => $permission,
+                    'metodo' => $request->method(),
+                    'ruta' => $request->path(),
+                    'rol' => $user?->rol,
+                    'status' => $status,
+                ],
+                $request
+            );
+        }
 
         return $response;
     }

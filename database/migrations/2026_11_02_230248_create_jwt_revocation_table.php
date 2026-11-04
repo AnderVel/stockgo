@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasTable('jwt_revocation')) {
+            return;
+        }
+
         Schema::create('jwt_revocation', function (Blueprint $table) {
             $table->id();
             $table->string('jti_hash')->unique();

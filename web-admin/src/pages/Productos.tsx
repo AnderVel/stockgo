@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { productService, type PageResponse } from '../api/services'
+import { bodegaService, productService, type PageResponse } from '../api/services'
 import { DataTable, ErrorState, formatCurrency, LoadingState, PageHeader, Pagination, StatusBadge } from '../components/ui'
 import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
@@ -13,9 +13,10 @@ type ProductForm = {
   stock_reservado?: string | number
   estado: string
   ubicacion: string
+  bodega_id?: string | number | null
 }
 
-const emptyForm: ProductForm = { codigo_barras: '', nombre: '', unidad_medida: 'pza', precio: 0, stock_fisico: 0, stock_reservado: 0, estado: 'ACTIVO', ubicacion: '' }
+const emptyForm: ProductForm = { codigo_barras: '', nombre: '', unidad_medida: 'pza', precio: 0, stock_fisico: 0, stock_reservado: 0, estado: 'ACTIVO', ubicacion: '', bodega_id: '' }
 
 export default function Productos() {
   const [rows, setRows] = useState<any[]>([])
@@ -31,6 +32,9 @@ export default function Productos() {
   const [saving, setSaving] = useState(false)
   const [deletingBusy, setDeletingBusy] = useState(false)
   const { showToast } = useToast()
+  const [bodegas, setBodegas] = useState<any[]>([])
+
+  useEffect(() => { void bodegaService.list().then((data) => setBodegas(Array.isArray(data) ? data : [])).catch(() => setBodegas([])) }, [])
 
   const load = async (requestedPage = page, search = query) => {
     setError(null)
@@ -46,7 +50,7 @@ export default function Productos() {
 
   const openAdd = () => { setForm({ ...emptyForm }); setEditing(null); setShowForm(true) }
   const openEdit = (product: any) => {
-    setForm({ codigo_barras: product.codigo_barras, nombre: product.nombre, unidad_medida: product.unidad_medida, precio: product.precio, estado: product.estado, ubicacion: product.ubicacion || '' })
+    setForm({ codigo_barras: product.codigo_barras, nombre: product.nombre, unidad_medida: product.unidad_medida, precio: product.precio, estado: product.estado, ubicacion: product.ubicacion || '', bodega_id: product.bodega_id ?? '' })
     setEditing(product)
     setShowForm(true)
   }
@@ -90,6 +94,7 @@ export default function Productos() {
     <div className="toolbar"><label className="search-field"><span>⌕</span><input placeholder="Buscar por nombre o código…" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} /></label><span className="result-count">{meta?.total ?? 0} registros</span></div>
     {error && !loading ? <ErrorState error={error} /> : loading ? <LoadingState text="Cargando productos…" /> : <DataTable rows={filtered} columns={[
       { key: 'nombre', label: 'Producto', render: (row) => <div className="entity-cell"><span className="entity-avatar product-avatar">{row.nombre?.slice(0, 1)}</span><span><strong>{row.nombre}</strong><small>{row.codigo_barras}</small></span></div> },
+      { key: 'bodega', label: 'Bodega', render: (row) => row.bodega?.nombre || <span className="cell-muted">Sin asignar</span> },
       { key: 'unidad_medida', label: 'Unidad' },
       { key: 'precio', label: 'Precio', render: (row) => formatCurrency(row.precio) },
       { key: 'stock_fisico', label: 'Físico' },
@@ -110,6 +115,7 @@ export default function Productos() {
         {editing && <div className="form-note form-span">El stock se modifica desde Movimientos para conservar trazabilidad. Disponible actual: <strong>{editing.stock_disponible}</strong>.</div>}
         <label>Estado<select value={form.estado} onChange={(event) => updateField('estado', event.target.value)} required><option value="ACTIVO">ACTIVO</option><option value="INACTIVO">INACTIVO</option></select></label>
         <label>Ubicación<input value={form.ubicacion} onChange={(event) => updateField('ubicacion', event.target.value)} /></label>
+        <label>Bodega<select value={form.bodega_id ?? ''} onChange={(event) => updateField('bodega_id', event.target.value)}><option value="">Sin asignar</option>{bodegas.map((b: any) => <option key={b.id} value={b.id}>{b.nombre}</option>)}</select></label>
         <div className="modal-footer form-span"><button type="button" className="button-secondary" onClick={closeForm} disabled={saving}>Cancelar</button><button type="submit" className="button-primary" disabled={saving}>{saving ? 'Guardando…' : editing ? 'Guardar cambios' : 'Crear producto'}</button></div>
       </form>
     </Modal>

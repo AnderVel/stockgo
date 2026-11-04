@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Producto extends Model
@@ -25,6 +26,7 @@ class Producto extends Model
         'stock_disponible',
         'estado',
         'ubicacion',
+        'bodega_id',
     ];
 
     protected $casts = [
@@ -50,5 +52,10 @@ class Producto extends Model
             'id_producto',
             'id_producto'
         );
+    }
+
+    public function bodega(): BelongsTo
+    {
+        return $this->belongsTo(Bodega::class, 'bodega_id', 'id');
     }
 }

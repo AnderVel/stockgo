@@ -151,6 +151,7 @@ export default function Movimientos() {
             columns={[
               { key: 'tipo', label: 'Tipo', render: (row) => <StatusBadge estado={row.tipo} /> },
               { key: 'producto', label: 'Producto', render: (row) => row.producto?.nombre || `#${row.id_producto}` },
+              { key: 'usuario', label: 'Realizado por', render: (row) => row.usuario?.username || row.usuario?.name || 'Sistema' },
               { key: 'cantidad', label: 'Cantidad' },
               { key: 'motivo', label: 'Motivo' },
               { key: 'stock_anterior', label: 'Antes' },

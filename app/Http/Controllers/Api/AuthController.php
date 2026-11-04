@@ -686,7 +686,8 @@ class AuthController extends Controller
             'id' => $user->id,
             'username' => $user->username,
             'rol' => $user->rol,
-            'bodega_asignada' => $user->bodega_asignada,
+            'bodega_id' => $user->bodega_id,
+            'bodega_asignada' => $user->bodega?->nombre ?? $user->bodega_asignada,
             'activo' => (bool) $user->activo,
             'two_factor_enabled' => (bool) $user->two_factor_enabled,
         ];
