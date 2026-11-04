@@ -8,6 +8,7 @@ use App\Models\Producto;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class InventarioController extends Controller
 {
@@ -134,7 +135,8 @@ class InventarioController extends Controller
 
     /**
      * Movimientos recientes.
-     * GET /api/movimientos/recientes?limite=20
+     * GET /api/movimientos/recientes?limite=20&mio=1
+     * mio=1 devuelve únicamente los movimientos del usuario autenticado.
      */
     public function recientes(Request $request): JsonResponse
     {
@@ -149,6 +151,10 @@ class InventarioController extends Controller
         }
 
         $movimientos = Movimiento::query()
+            ->when(
+                $request->boolean('mio'),
+                fn ($query) => $query->where('usuario_id', Auth::id())
+            )
             ->with([
                 'producto:id_producto,nombre',
                 'pedido:id_pedido',
