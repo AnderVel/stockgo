@@ -42,7 +42,9 @@ class WebAuthController extends Controller
             ], 429);
         }
 
-        $user = User::where('username', $usuario)->first();
+        // Busqueda sin distinguir mayusculas: el login compara en minusculas
+        // aunque el usuario se haya guardado con mayusculas.
+        $user = User::whereRaw('LOWER(username) = ?', [$usuario])->first();
 
         if (! $user || ! Hash::check($datos['password'], $user->password)) {
             RateLimiter::hit($key, 60);
@@ -162,7 +164,9 @@ class WebAuthController extends Controller
         ]);
 
         $usuario = Str::lower(trim($datos['usuario']));
-        $user = User::where('username', $usuario)->first();
+        // Busqueda sin distinguir mayusculas: el login compara en minusculas
+        // aunque el usuario se haya guardado con mayusculas.
+        $user = User::whereRaw('LOWER(username) = ?', [$usuario])->first();
 
         if (! $user || ! Hash::check($datos['password'], $user->password)) {
             return response()->json([
@@ -224,7 +228,9 @@ class WebAuthController extends Controller
         ]);
 
         $usuario = Str::lower(trim($datos['usuario']));
-        $user = User::where('username', $usuario)->first();
+        // Busqueda sin distinguir mayusculas: el login compara en minusculas
+        // aunque el usuario se haya guardado con mayusculas.
+        $user = User::whereRaw('LOWER(username) = ?', [$usuario])->first();
 
         if (! $user || ! Hash::check($datos['password'], $user->password)) {
             return response()->json([

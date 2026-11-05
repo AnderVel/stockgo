@@ -40,7 +40,9 @@ class AuthController extends Controller
             ], 429);
         }
 
-        $user = User::where('username', $usuario)->first();
+        // Busqueda sin distinguir mayusculas: el usuario se guarda igual que
+        // como se escribe, pero el login siempre compara en minusculas.
+        $user = User::whereRaw('LOWER(username) = ?', [$usuario])->first();
 
         if (
             ! $user ||
@@ -321,7 +323,7 @@ class AuthController extends Controller
             try {
                 Password::sendResetLink($datos);
             } catch (\Throwable $exception) {
-                $user = User::where('email', $datos['email'])->first();
+                $user = User::whereRaw('LOWER(email) = ?', [mb_strtolower(trim($datos['email']))])->first();
 
                 if ($user) {
                     Password::getRepository()->delete($user);

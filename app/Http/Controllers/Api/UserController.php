@@ -11,6 +11,7 @@ use App\Services\PasswordPolicyService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class UserController extends Controller
 {
@@ -54,10 +55,51 @@ class UserController extends Controller
 
     public function store(Request $request)
     {
+        // El login siempre compara el usuario en minusculas, por eso el alta
+        // se normaliza igual. Asi ningun usuario queda con mayusculas que
+        // despues el sistema no encuentra.
+        if ($request->has('username')) {
+            $request->merge([
+                'username' => Str::lower(trim((string) $request->input('username'))),
+            ]);
+        }
+
+        if ($request->has('email')) {
+            $request->merge([
+                'email' => Str::lower(trim((string) $request->input('email'))),
+            ]);
+        }
+
         $datos = $request->validate([
             'name' => 'required|string|max:255',
-            'username' => 'required|string|max:100|unique:users,username',
-            'email' => 'required|email|max:255|unique:users,email',
+            'username' => [
+                'required',
+                'string',
+                'max:100',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! is_string($value) || $value === '') {
+                        return;
+                    }
+
+                    if (User::whereRaw('LOWER(username) = ?', [mb_strtolower($value)])->exists()) {
+                        $fail('Ese nombre de usuario ya esta registrado.');
+                    }
+                },
+            ],
+            'email' => [
+                'required',
+                'email',
+                'max:255',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! is_string($value) || $value === '') {
+                        return;
+                    }
+
+                    if (User::whereRaw('LOWER(email) = ?', [mb_strtolower($value)])->exists()) {
+                        $fail('Ese correo electronico ya esta registrado.');
+                    }
+                },
+            ],
             'password' => 'required|string|min:12|max:255',
             'rol' => 'required|string|in:Administrador,Administrador Regular,Operador de Almacén',
             'bodega_id' => 'nullable|integer|exists:bodegas,id',
