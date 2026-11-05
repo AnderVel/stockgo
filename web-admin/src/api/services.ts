@@ -22,6 +22,7 @@ type ListParams = {
   search?: string
   estado?: string
   tipo?: string
+  mes?: string
 }
 
 function listQuery(params: ListParams = {}) {
@@ -95,7 +96,7 @@ export const userService = {
   list: (params: ListParams = {}) => api<PageResponse<any>>(`/usuarios${listQuery(params)}`),
   create: (data: any) => api('/usuarios', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: number, data: any) => api(`/usuarios/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  remove: (id: number) => api(`/usuarios/${id}`, { method: 'DELETE' }),
+  remove: (id: number, password: string) => api(`/usuarios/${id}`, { method: 'DELETE', body: JSON.stringify({ password }) }),
   reset2fa: (id: number) => api(`/usuarios/${id}/reset-2fa`, { method: 'POST' }),
   setup2fa: (usuario: string, password: string) => api('/auth/2fa/setup', { method: 'POST', body: JSON.stringify({ usuario, password }) }),
   confirm2fa: (usuario: string, password: string, code: string) => api('/auth/2fa/confirm', { method: 'POST', body: JSON.stringify({ usuario, password, code }) }),

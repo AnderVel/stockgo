@@ -209,6 +209,26 @@ class UserController extends Controller
             ], 403);
         }
 
+        // Confirmación de identidad: contraseña del administrador
+        $datos = $request->validate([
+            'password' => ['required', 'string'],
+        ]);
+
+        if (! Hash::check($datos['password'], $currentUser->password)) {
+            app(AuditoriaService::class)->registrar(
+                'ELIMINACION_USUARIO_DENEGADA',
+                'USUARIOS',
+                'Intento de eliminar usuario sin confirmar la contraseña.',
+                ['id_objetivo' => $user->id],
+                $request
+            );
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Contraseña incorrecta. Confirma tu contraseña de administrador para eliminar.',
+            ], 422);
+        }
+
         // No permitir auto-eliminación
         if ($currentUser->is($user)) {
             return response()->json([
@@ -237,26 +257,23 @@ class UserController extends Controller
             app(AuditoriaService::class)->registrar(
                 'ELIMINAR',
                 'USUARIOS',
-                'Usuario eliminado.',
+                'Usuario eliminado: '.$userName.'. Su historial se conserva anonimizado.',
                 ['id' => $userId, 'nombre' => $userName],
                 $request
             );
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Usuario eliminado correctamente.',
+                'message' => 'Usuario eliminado correctamente. Su historial de auditoría y movimientos se conserva de forma anónima.',
             ]);
         } catch (QueryException $e) {
-            // Detectar SQLSTATE 23503 = foreign_key_violation (PostgreSQL)
-            // $e->getCode() devuelve el SQLSTATE como string en Postgres
-            // $e->errorInfo[1] contiene el código nativo del driver (23503 en Postgres)
             $sqlState = $e->getCode();
             $nativeCode = $e->errorInfo[1] ?? null;
 
             if ($sqlState === '23503' || $nativeCode === 23503) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'No se puede eliminar el usuario porque tiene historial de auditoría. Desactívelo en su lugar.',
+                    'message' => 'No se puede eliminar el usuario porque aún tiene registros que lo referencian. Desactívelo en su lugar.',
                 ], 409);
             }
 

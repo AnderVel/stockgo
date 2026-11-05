@@ -14,9 +14,64 @@ type BodegaResumen = {
 export default function Inventario() {
   const [rows, setRows] = useState<any[]>([]); const [query, setQuery] = useState(''); const [page, setPage] = useState(1); const [meta, setMeta] = useState<PageResponse<any> | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState<any>(null)
   const [bodegas, setBodegas] = useState<BodegaResumen[]>([])
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => { setLoading(true); productService.list({ page, search: query }).then((response) => { setRows(response.data); setMeta(response) }).catch(setError).finally(() => setLoading(false)) }, [page, query])
   useEffect(() => { void inventoryService.porBodega().then((response) => setBodegas(response.data ?? [])).catch(() => setBodegas([])) }, [])
+
+  const exportarPdf = async () => {
+    setExporting(true)
+    try {
+      const coleccion: any[] = []
+      let pagina = 1
+      for (;;) {
+        const respuesta = await productService.list({ page: pagina, search: query, per_page: 500 })
+        coleccion.push(...respuesta.data)
+        if (pagina >= (respuesta.last_page ?? 1) || pagina >= 10) break
+        pagina += 1
+      }
+
+      if (coleccion.length === 0) {
+        return
+      }
+
+      const { jsPDF } = await import('jspdf')
+      const autoTable = (await import('jspdf-autotable')).default
+
+      const doc = new jsPDF({ orientation: 'landscape' })
+      doc.setFontSize(14)
+      doc.text('StockGo — Inventario de productos', 14, 15)
+      doc.setFontSize(9)
+      doc.text(
+        `${coleccion.length} productos${query ? ` · Filtro: "${query}"` : ''} · Generado ${new Date().toLocaleString('es-MX')}`,
+        14, 21,
+      )
+
+      autoTable(doc, {
+        startY: 26,
+        head: [['#', 'Producto', 'Código', 'Bodega', 'Ubicación', 'Físico', 'Reservado', 'Disponible', 'Estado']],
+        body: coleccion.map((p) => [
+          p.id_producto,
+          p.nombre,
+          p.codigo_barras,
+          p.bodega?.nombre ?? 'Sin asignar',
+          p.ubicacion ?? '',
+          p.stock_fisico,
+          p.stock_reservado,
+          p.stock_disponible,
+          p.estado,
+        ]),
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [102, 89, 217] },
+      })
+
+      doc.save(`inventario-${new Date().toISOString().slice(0, 10)}.pdf`)
+    } catch {
+      // silencioso: el botón ya informa estados vía loading
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return <div className="page-stack">
     <PageHeader title="Inventario" description="Visibilidad del stock físico, reservado y disponible por producto y por bodega." />
@@ -38,7 +93,7 @@ export default function Inventario() {
       </div>
     </>}
 
-    <div className="toolbar"><label className="search-field"><span>⌕</span><input placeholder="Buscar producto o código…" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} /></label><span className="result-count">{meta?.total ?? 0} productos</span></div>
+    <div className="toolbar"><label className="search-field"><span>⌕</span><input placeholder="Buscar producto o código…" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} /></label><button type="button" className="button-quiet" onClick={() => void exportarPdf()} disabled={exporting}>{exporting ? 'Generando…' : 'Descargar PDF'}</button><span className="result-count">{meta?.total ?? 0} productos</span></div>
     {loading ? <LoadingState text="Cargando inventario…" /> : error ? <ErrorState error={error} /> : <>
       <DataTable rows={rows} columns={[
         { key: 'nombre', label: 'Producto', render: (row) => <div className="entity-cell"><span className="entity-avatar product-avatar">{row.nombre?.slice(0, 1)}</span><span><strong>{row.nombre}</strong><small>{row.codigo_barras}</small></span></div> },

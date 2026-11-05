@@ -17,6 +17,7 @@ interface ProductSelection {
 export default function Movimientos() {
   const [rows, setRows] = useState<any[]>([])
   const [tipo, setTipo] = useState('')
+  const [mes, setMes] = useState('')
   const [page, setPage] = useState(1)
   const [meta, setMeta] = useState<PageResponse<any> | null>(null)
   const [show, setShow] = useState(false)
@@ -28,14 +29,19 @@ export default function Movimientos() {
   const [searching, setSearching] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<any>(null)
   const { showToast } = useToast()
 
-  const load = async (requestedPage = page, requestedType = tipo) => {
+  const load = async (requestedPage = page, requestedType = tipo, requestedMes = mes) => {
     setError(null)
     setLoading(true)
     try {
-      const response = await inventoryService.movements({ page: requestedPage, tipo: requestedType })
+      const response = await inventoryService.movements({
+        page: requestedPage,
+        tipo: requestedType,
+        mes: requestedMes || undefined,
+      })
       setRows(response.data)
       setMeta(response)
     } catch (caught) {
@@ -45,7 +51,71 @@ export default function Movimientos() {
     }
   }
 
-  useEffect(() => { void load(page, tipo) }, [page, tipo])
+  useEffect(() => { void load(page, tipo, mes) }, [page, tipo, mes])
+
+  const exportarPdf = async () => {
+    setExporting(true)
+    try {
+      // Traer todas las páginas del corte elegido (máx. 10 páginas = 5000 filas)
+      const coleccion: any[] = []
+      let pagina = 1
+      for (;;) {
+        const respuesta = await inventoryService.movements({
+          page: pagina,
+          tipo,
+          mes: mes || undefined,
+          per_page: 500,
+        })
+        coleccion.push(...respuesta.data)
+        if (pagina >= (respuesta.last_page ?? 1) || pagina >= 10) break
+        pagina += 1
+      }
+
+      if (coleccion.length === 0) {
+        showToast('No hay movimientos para exportar con ese filtro.', 'error')
+        return
+      }
+
+      const { jsPDF } = await import('jspdf')
+      const autoTable = (await import('jspdf-autotable')).default
+
+      const doc = new jsPDF({ orientation: 'landscape' })
+      doc.setFontSize(14)
+      doc.text('StockGo — Movimientos de inventario', 14, 15)
+      doc.setFontSize(9)
+      doc.text(
+        `Corte: ${mes ? new Date(`${mes}-01T12:00:00`).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }) : 'histórico completo'}`
+        + `${tipo ? ` · Tipo: ${tipo}` : ''}`
+        + ` · ${coleccion.length} registros · Generado ${new Date().toLocaleString('es-MX')}`,
+        14, 21,
+      )
+
+      autoTable(doc, {
+        startY: 26,
+        head: [['#', 'Fecha', 'Tipo', 'Producto', 'Cantidad', 'Realizado por', 'Motivo', 'Antes', 'Después']],
+        body: coleccion.map((m) => [
+          m.id_movimiento,
+          formatDate(m.created_at),
+          m.tipo,
+          m.producto?.nombre ?? `#${m.id_producto}`,
+          `${m.tipo === 'ENTRADA' ? '+' : m.tipo === 'SALIDA' ? '−' : '±'}${m.cantidad}`,
+          m.usuario?.username ?? m.usuario?.name ?? 'Sistema',
+          m.motivo ?? '',
+          m.stock_anterior ?? '',
+          m.stock_nuevo ?? '',
+        ]),
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [102, 89, 217] },
+      })
+
+      doc.save(`movimientos-${mes || 'completo'}.pdf`)
+      showToast('PDF generado correctamente.', 'success')
+    } catch (caught: any) {
+      showToast(caught.message || 'No fue posible generar el PDF.', 'error')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const handleSearchChange = async (value: string) => {
     // Invalidar la selección anterior cuando el usuario modifica la búsqueda
@@ -138,6 +208,24 @@ export default function Movimientos() {
           <option value="SALIDA">Salidas</option>
           <option value="AJUSTE">Ajustes</option>
         </select>
+        <input
+          type="month"
+          className="filter-select"
+          value={mes}
+          onChange={(event) => {
+            setMes(event.target.value)
+            setPage(1)
+          }}
+          title="Filtrar por mes (vacío = histórico completo)"
+        />
+        <button
+          type="button"
+          className="button-quiet"
+          onClick={() => void exportarPdf()}
+          disabled={exporting}
+        >
+          {exporting ? 'Generando…' : 'Descargar PDF'}
+        </button>
         <span className="result-count">{meta?.total ?? 0} movimientos</span>
       </div>
       {loading ? (

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Mail\PedidoEnviadoMail;
+use App\Models\Bodega;
 use App\Models\Cliente;
 use App\Models\Pedido;
 use App\Models\Producto;
@@ -48,6 +49,18 @@ class PedidoController extends Controller
                             ->where('estado', 'PENDIENTE');
                     });
             });
+
+            // Con bodega asignada, además, no se le ofrecen pedidos que
+            // contengan productos de otra bodega (o sin bodega): no podría
+            // surtirlos físicamente.
+            if ($usuario->bodega_id) {
+                $query->whereDoesntHave('detalles.producto', function ($productoQuery) use ($usuario): void {
+                    $productoQuery->where(function ($bodegaQuery) use ($usuario): void {
+                        $bodegaQuery->where('productos.bodega_id', '!=', $usuario->bodega_id)
+                            ->orWhereNull('productos.bodega_id');
+                    });
+                });
+            }
         }
 
         if ($request->filled('estado')) {
@@ -126,7 +139,13 @@ class PedidoController extends Controller
             ]);
 
             if (! empty($datos['operador_id'])) {
-                $this->validarOperador((int) $datos['operador_id']);
+                $operadorDestino = $this->validarOperador((int) $datos['operador_id']);
+
+                // El operador solo puede recibir pedidos de su bodega
+                $this->validarBodegaDelOperador(
+                    $operadorDestino,
+                    collect($datos['detalles'])->pluck('id_producto')->all()
+                );
             }
 
             $operacion = 'abrir_transaccion';
@@ -369,7 +388,10 @@ class PedidoController extends Controller
 
         if (! empty($datos['operador_id'])) {
             try {
-                $this->validarOperador((int) $datos['operador_id']);
+                $operadorDestino = $this->validarOperador((int) $datos['operador_id']);
+
+                // El operador solo puede recibir pedidos de su bodega
+                $this->validarBodegaDelPedido($operadorDestino, $pedido);
             } catch (\InvalidArgumentException $e) {
                 return response()->json([
                     'status' => 'error',
@@ -446,6 +468,16 @@ class PedidoController extends Controller
                 'status' => 'error',
                 'message' => 'Debes iniciar sesión para tomar un pedido.',
             ], 401);
+        }
+
+        // El operador solo puede tomar pedidos de su bodega asignada
+        try {
+            $this->validarBodegaDelPedido($usuario, $pedido);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 422);
         }
 
         $resultado = DB::transaction(function () use ($pedido, $usuario) {
@@ -536,6 +568,50 @@ class PedidoController extends Controller
         }
 
         return $operador;
+    }
+
+    /**
+     * Un operador con bodega asignada solo puede hacerse cargo de pedidos
+     * cuyos productos estén TODOS en su bodega (o sin bodega asignada).
+     *
+     * @param  array<int, array{id_producto: int}>  $detalles
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function validarBodegaDelOperador(User $operador, array $idProductos): void
+    {
+        if (! $operador->bodega_id || empty($idProductos)) {
+            return;
+        }
+
+        $fuera = Producto::query()
+            ->whereIn('id_producto', $idProductos)
+            ->where(function ($query) use ($operador): void {
+                $query->where(function ($bodega) use ($operador): void {
+                    $bodega->where('bodega_id', '!=', $operador->bodega_id)
+                        ->orWhereNull('bodega_id');
+                });
+            })
+            ->orderBy('nombre')
+            ->pluck('nombre');
+
+        if ($fuera->isNotEmpty()) {
+            $bodega = Bodega::find($operador->bodega_id)?->nombre ?? 'su bodega';
+
+            throw new \InvalidArgumentException(
+                'El operador trabaja en '.$bodega.' y este pedido incluye '.
+                'productos de otra bodega (o sin ubicar): '.$fuera->implode(', ').
+                '. Asígnalo a un operador de la bodega correcta.'
+            );
+        }
+    }
+
+    private function validarBodegaDelPedido(User $operador, Pedido $pedido): void
+    {
+        $this->validarBodegaDelOperador(
+            $operador,
+            $pedido->detalles()->pluck('id_producto')->all()
+        );
     }
 
     public function update(
@@ -842,6 +918,12 @@ class PedidoController extends Controller
                     throw new \InvalidArgumentException(
                         'Este pedido está asignado a otro operador. No puedes surtirlo.'
                     );
+                }
+
+                // Blindaje: aunque un pedido quedara mal asignado, el operador
+                // solo puede surtir pedidos de su propia bodega.
+                if ($usuario) {
+                    $this->validarBodegaDelPedido($usuario, $pedido);
                 }
 
                 if ($pedido->operador_id === null && $usuario) {

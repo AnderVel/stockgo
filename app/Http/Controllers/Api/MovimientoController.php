@@ -30,6 +30,24 @@ class MovimientoController extends Controller
             $query->where('tipo', $request->query('tipo'));
         }
 
+        // Corte mensual: ?mes=YYYY-MM (enviado por el selector del web admin)
+        if ($request->filled('mes')) {
+            $mes = (string) $request->query('mes');
+
+            if (preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $mes)) {
+                $inicio = \Illuminate\Support\Carbon::parse($mes.'-01 00:00:00');
+                $fin = $inicio->copy()->addMonth();
+
+                $query->where('created_at', '>=', $inicio)
+                    ->where('created_at', '<', $fin);
+            } else {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'El mes debe tener el formato AAAA-MM (ej. 2026-11).',
+                ], 422);
+            }
+        }
+
         if ($request->filled('search')) {
             $search = $request->query('search');
             $query->whereHas('producto', function ($builder) use ($search): void {
@@ -40,7 +58,8 @@ class MovimientoController extends Controller
         }
 
         if ($request->boolean('paginate')) {
-            $perPage = min(max($request->integer('per_page', 25), 1), 50);
+            // El techo de 500 permite exportar el corte mensual completo a PDF
+            $perPage = min(max($request->integer('per_page', 25), 1), 500);
 
             return response()->json($query->paginate($perPage));
         }
