@@ -685,7 +685,7 @@
 }
 
 .pedido-detail-table-wrap table {
-  min-width: 650px;
+  min-width: 900px;
 }
 
 .pedido-detail-observations {
@@ -800,6 +800,86 @@
   .pedido-detail-facts {
     grid-template-columns: 1fr;
   }
+}
+
+/* ------------------------------------------------------------------
+   Asignación por bodega: un mismo pedido puede mezclar bodegas y cada
+   grupo de productos se asigna y se surte por separado.
+   ------------------------------------------------------------------ */
+
+.operador-por-bodega {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.operador-por-bodega li {
+  display: flex;
+  gap: 5px;
+  align-items: baseline;
+}
+
+.bodega-etiqueta {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--violet);
+  background: var(--lavender);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+.pedido-avance {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.grupo-bodega {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.grupo-bodega-titulo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.grupo-bodega-titulo strong {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.grupo-bodega-titulo small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.grupo-bodega-productos {
+  margin: 0 0 8px;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.grupo-bodega-productos li {
+  margin-bottom: 2px;
+}
+
+.grupo-bodega-productos em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--mint-ink);
 }
 
 @media (prefers-reduced-motion: reduce) {

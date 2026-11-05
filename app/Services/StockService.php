@@ -198,16 +198,36 @@ class StockService
 
     /**
      * Surtir un pedido: descuenta stock_fisico, libera reserva y crea movimientos.
+     *
+     * Un pedido puede mezclar bodegas, por eso se puede indicar el operador:
+     * en ese caso solo se surten las lineas asignadas a el. Cuando ya no quede
+     * ninguna linea pendiente el pedido pasa a SURTIDO; mientras queden lineas
+     * de otras bodegas se queda en PENDIENTE (surtido parcial).
+     *
      * Debe ejecutarse dentro de una transacción.
      */
-    public function surtir(Pedido $pedido): void
+    public function surtir(Pedido $pedido, ?int $operadorId = null): void
     {
-        DB::transaction(function () use ($pedido) {
+        DB::transaction(function () use ($pedido, $operadorId) {
             if ($pedido->estado !== 'PENDIENTE') {
                 throw new \InvalidArgumentException('El pedido no está pendiente de surtido.');
             }
 
-            $detalles = $pedido->detalles()->lockForUpdate()->get();
+            $consulta = $pedido->detalles()
+                ->where('surtido', false);
+
+            if ($operadorId !== null) {
+                $consulta->where('operador_id', $operadorId);
+            }
+
+            $detalles = $consulta->lockForUpdate()->get();
+
+            if ($detalles->isEmpty()) {
+                throw new \InvalidArgumentException(
+                    'No tienes productos pendientes de surtir en este pedido.'
+                );
+            }
+
             $idsProductos = $detalles->pluck('id_producto')->sort()->values();
 
             $productos = [];
@@ -251,7 +271,16 @@ class StockService
                 ]);
             }
 
-            $pedido->update(['estado' => 'SURTIDO']);
+            // Solo se marcan como surtidas las lineas procesadas en esta pasada.
+            DetallePedido::whereIn(
+                'id_detalle_pedido',
+                $detalles->pluck('id_detalle_pedido')
+            )->update(['surtido' => true]);
+
+            // El pedido queda SURTIDO cuando ya no queda ninguna linea pendiente.
+            if (! $pedido->detalles()->where('surtido', false)->exists()) {
+                $pedido->update(['estado' => 'SURTIDO']);
+            }
         });
     }
 
@@ -267,6 +296,15 @@ class StockService
             }
 
             $detalles = $pedido->detalles()->lockForUpdate()->get();
+
+            // Si un operador ya surtió parte del pedido no se puede cancelar:
+            // esas mercancías ya salieron del almacén.
+            if ($detalles->contains('surtido', true)) {
+                throw new \InvalidArgumentException(
+                    'No se puede cancelar: un operador ya surtió parte de este pedido.'
+                );
+            }
+
             $idsProductos = $detalles->pluck('id_producto')->sort()->values();
 
             $productos = [];

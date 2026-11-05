@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Mail\PedidoEnviadoMail;
 use App\Models\Bodega;
 use App\Models\Cliente;
+use App\Models\DetallePedido;
 use App\Models\Pedido;
 use App\Models\Producto;
 use App\Models\User;
@@ -34,45 +35,53 @@ class PedidoController extends Controller
 
         $query = Pedido::with([
             'cliente',
-            'detalles.producto',
+            'detalles.producto.bodega',
+            'detalles.operador:id,name,username',
             'operador:id,name,username',
         ])->orderByDesc('id_pedido');
 
-        // El operario solo ve los pedidos que tiene asignados y los que
-        // todavía no tienen dueño (para poder tomarlos). Así un pedido no
-        // aparece en la lista de todos los operarios a la vez.
+        // Un pedido ya no se asigna entero: cada linea (producto) lleva su
+        // operador, porque el pedido puede mezclar bodegas. El operario ve
+        // los pedidos donde ya tiene lineas asignadas y los pendientes que
+        // todavia tengan lineas libres de su propia bodega.
         if ($usuario && $usuario->rol === self::ROL_OPERADOR) {
             $query->where(function ($builder) use ($usuario): void {
-                $builder->where('operador_id', $usuario->id)
-                    ->orWhere(function ($sinAsignar): void {
-                        $sinAsignar->whereNull('operador_id')
-                            ->where('estado', 'PENDIENTE');
-                    });
-            });
-
-            // Con bodega asignada, además, no se le ofrecen pedidos que
-            // contengan productos de otra bodega (o sin bodega): no podría
-            // surtirlos físicamente.
-            if ($usuario->bodega_id) {
-                $query->whereDoesntHave('detalles.producto', function ($productoQuery) use ($usuario): void {
-                    $productoQuery->where(function ($bodegaQuery) use ($usuario): void {
-                        $bodegaQuery->where('productos.bodega_id', '!=', $usuario->bodega_id)
-                            ->orWhereNull('productos.bodega_id');
-                    });
+                $builder->whereHas('detalles', function ($detalles) use ($usuario): void {
+                    $detalles->where('detalle_pedidos.operador_id', $usuario->id);
+                })->orWhere(function ($pendientes) use ($usuario): void {
+                    $pendientes->where('estado', 'PENDIENTE')
+                        ->whereHas('detalles', function ($detalles) use ($usuario): void {
+                            $detalles->whereNull('detalle_pedidos.operador_id')
+                                ->where('detalle_pedidos.surtido', false)
+                                ->whereHas('producto', function ($producto) use ($usuario): void {
+                                    if ($usuario->bodega_id) {
+                                        $producto->where('bodega_id', $usuario->bodega_id);
+                                    }
+                                });
+                        });
                 });
-            }
+            });
         }
 
         if ($request->filled('estado')) {
             $query->where('estado', $request->query('estado'));
         }
 
+        // Filtros de administracion por linea: un mismo pedido puede tener
+        // varios operadores (uno por bodega), asi que ya no se filtra por la
+        // cabecera.
         if ($request->filled('operador_id')) {
-            $query->where('operador_id', $request->integer('operador_id'));
+            $idOperador = $request->integer('operador_id');
+
+            $query->whereHas('detalles', function ($detalles) use ($idOperador): void {
+                $detalles->where('detalle_pedidos.operador_id', $idOperador);
+            });
         }
 
         if ($request->boolean('sin_asignar')) {
-            $query->whereNull('operador_id');
+            $query->whereDoesntHave('detalles', function ($detalles): void {
+                $detalles->whereNotNull('detalle_pedidos.operador_id');
+            });
         }
 
         if ($request->filled('search')) {
@@ -138,19 +147,18 @@ class PedidoController extends Controller
                 ],
             ]);
 
+            // Un pedido puede mezclar bodegas: si se entrega un operador al
+            // crear, solo quedan asignadas las lineas de SU bodega. Las de
+            // otras bodegas quedan libres para el operador que les corresponda.
+            $operadorDestino = null;
+
             if (! empty($datos['operador_id'])) {
                 $operadorDestino = $this->validarOperador((int) $datos['operador_id']);
-
-                // El operador solo puede recibir pedidos de su bodega
-                $this->validarBodegaDelOperador(
-                    $operadorDestino,
-                    collect($datos['detalles'])->pluck('id_producto')->all()
-                );
             }
 
             $operacion = 'abrir_transaccion';
 
-            $pedido = DB::transaction(function () use ($datos, $request, &$operacion) {
+            $pedido = DB::transaction(function () use ($datos, $request, $operadorDestino, &$operacion) {
                 $operacion = 'bloquear_cliente';
                 $cliente = Cliente::where('id_cliente', $datos['id_cliente'])
                     ->lockForUpdate()
@@ -206,6 +214,20 @@ class PedidoController extends Controller
                     $totalCentavos += $importe['subtotal_centavos'];
                 }
 
+                // Si se pidio un operador, al menos una linea debe pertenecer
+                // a su bodega; si no, el pedido no podria surtirse.
+                if ($operadorDestino) {
+                    $sinLineasPropias = ! collect($productos)->contains(
+                        fn (Producto $producto): bool => $this->lineaCorrespondeAlOperador($operadorDestino, $producto)
+                    );
+
+                    if ($sinLineasPropias) {
+                        throw new \InvalidArgumentException(
+                            'Ningun producto de este pedido pertenece a la bodega del operador seleccionado.'
+                        );
+                    }
+                }
+
                 $operacion = 'insertar_encabezado';
                 $pedido = Pedido::create([
                     'id_cliente' => $datos['id_cliente'],
@@ -224,6 +246,9 @@ class PedidoController extends Controller
                     $operacion = 'insertar_detalle';
                     $pedido->detalles()->create([
                         'id_producto' => $producto->id_producto,
+                        'operador_id' => $this->lineaCorrespondeAlOperador($operadorDestino, $producto)
+                            ? $operadorDestino->id
+                            : null,
                         'cantidad' => $cantidad,
                         'precio_unitario' => $importe['precio_unitario'],
                         'subtotal' => $importe['subtotal'],
@@ -253,7 +278,8 @@ class PedidoController extends Controller
 
                 return $pedido->load([
                     'cliente',
-                    'detalles.producto',
+                    'detalles.producto.bodega',
+                    'detalles.operador:id,name,username',
                 ]);
             });
 
@@ -349,22 +375,38 @@ class PedidoController extends Controller
     {
         $usuario = $request->user();
 
-        if (
-            $usuario &&
-            $usuario->rol === self::ROL_OPERADOR &&
-            $pedido->operador_id !== null &&
-            (int) $pedido->operador_id !== (int) $usuario->id
-        ) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Este pedido está asignado a otro operador.',
-            ], 403);
+        // El operario solo puede ver un pedido si ya tiene lineas propias en
+        // el o si todavia quedan lineas libres de su bodega para tomarlas.
+        if ($usuario && $usuario->rol === self::ROL_OPERADOR) {
+            $tieneLineasPropias = $pedido->detalles()
+                ->where('operador_id', $usuario->id)
+                ->exists();
+
+            if (! $tieneLineasPropias) {
+                $lineasLibres = $pedido->detalles()
+                    ->whereNull('operador_id')
+                    ->where('surtido', false);
+
+                if ($usuario->bodega_id) {
+                    $lineasLibres->whereHas('producto', function ($producto) use ($usuario): void {
+                        $producto->where('bodega_id', $usuario->bodega_id);
+                    });
+                }
+
+                if (! $lineasLibres->exists()) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Este pedido no tiene productos para tu bodega.',
+                    ], 403);
+                }
+            }
         }
 
         return response()->json(
             $pedido->load([
                 'cliente',
-                'detalles.producto',
+                'detalles.producto.bodega',
+                'detalles.operador:id,name,username',
                 'operador:id,name,username',
                 'movimientos',
             ])
@@ -372,8 +414,14 @@ class PedidoController extends Controller
     }
 
     /**
-     * Asigna el pedido a un operador de almacén (solo administración).
-     * Enviar "operador_id": null libera la asignación.
+     * Asigna un operador a las lineas del pedido que le corresponden
+     * (solo administracion). Como un pedido puede mezclar bodegas, al elegir
+     * un operador se asignan unicamente los productos de SU bodega y los de
+     * las demas bodegas quedan libres para el operador que les corresponda.
+     *
+     * Con "bodega_id" la operacion se limita a esa bodega, para asignar o
+     * liberar solo un grupo del pedido. Enviar "operador_id": null libera
+     * las lineas que toquen y aun no se han surtido.
      */
     public function asignar(Request $request, Pedido $pedido)
     {
@@ -384,14 +432,19 @@ class PedidoController extends Controller
                 'integer',
                 'exists:users,id',
             ],
+
+            'bodega_id' => [
+                'sometimes',
+                'nullable',
+                'integer',
+            ],
         ]);
+
+        $operadorDestino = null;
 
         if (! empty($datos['operador_id'])) {
             try {
                 $operadorDestino = $this->validarOperador((int) $datos['operador_id']);
-
-                // El operador solo puede recibir pedidos de su bodega
-                $this->validarBodegaDelPedido($operadorDestino, $pedido);
             } catch (\InvalidArgumentException $e) {
                 return response()->json([
                     'status' => 'error',
@@ -400,7 +453,27 @@ class PedidoController extends Controller
             }
         }
 
-        $resultado = DB::transaction(function () use ($datos, $pedido) {
+        // "bodega_id" ausente o null = todo el pedido; 0 = solo los productos
+        // que aun no tienen bodega; N = solo los productos de esa bodega.
+        $filtraBodega = array_key_exists('bodega_id', $datos)
+            && $datos['bodega_id'] !== null;
+
+        $idBodega = $filtraBodega ? (int) $datos['bodega_id'] : null;
+
+        if (
+            $idBodega &&
+            $operadorDestino &&
+            $operadorDestino->bodega_id &&
+            (int) $operadorDestino->bodega_id !== $idBodega
+        ) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Ese operador no pertenece a '.
+                    (Bodega::find($idBodega)?->nombre ?? 'esa bodega').'.',
+            ], 422);
+        }
+
+        $resultado = DB::transaction(function () use ($pedido, $operadorDestino, $idBodega, $filtraBodega) {
             $pedido = Pedido::where('id_pedido', $pedido->id_pedido)
                 ->lockForUpdate()
                 ->firstOrFail();
@@ -413,26 +486,135 @@ class PedidoController extends Controller
                 ];
             }
 
-            $pedido->update([
-                'operador_id' => $datos['operador_id'] ?? null,
-            ]);
+            $lineas = $pedido->detalles()
+                ->with('producto')
+                ->where('surtido', false)
+                ->get();
+
+            if ($lineas->isEmpty()) {
+                return [
+                    'error' => true,
+                    'status' => 409,
+                    'message' => 'Este pedido ya tiene todos sus productos surtidos.',
+                ];
+            }
+
+            // Con bodega_id la operacion se limita a los productos de esa bodega.
+            if ($filtraBodega) {
+                $deLaBodega = $lineas->filter(function (DetallePedido $detalle) use ($idBodega): bool {
+                    if (! $detalle->producto) {
+                        return false;
+                    }
+
+                    $bodegaProducto = $detalle->producto->bodega_id;
+
+                    return $idBodega === 0
+                        ? $bodegaProducto === null
+                        : $bodegaProducto !== null && (int) $bodegaProducto === $idBodega;
+                });
+
+                if ($deLaBodega->isEmpty()) {
+                    return [
+                        'error' => true,
+                        'status' => 422,
+                        'message' => $idBodega === 0
+                            ? 'Este pedido no tiene productos sin bodega asignada.'
+                            : 'Este pedido no tiene productos en '.
+                                (Bodega::find($idBodega)?->nombre ?? 'esa bodega').'.',
+                    ];
+                }
+
+                $lineas = $deLaBodega;
+            }
+
+            if ($operadorDestino) {
+                $tocadas = $lineas->filter(
+                    fn (DetallePedido $detalle): bool => $this->lineaCorrespondeAlOperador($operadorDestino, $detalle->producto)
+                );
+
+                if ($tocadas->isEmpty()) {
+                    $nombreBodega = $operadorDestino->bodega_id
+                        ? Bodega::find($operadorDestino->bodega_id)?->nombre
+                        : null;
+
+                    return [
+                        'error' => true,
+                        'status' => 422,
+                        'message' => 'Este pedido no tiene productos'
+                            . ($nombreBodega ? ' de '.$nombreBodega : '')
+                            . ' para asignarle a ese operador.',
+                    ];
+                }
+
+                $pedido->detalles()
+                    ->whereIn('id_detalle_pedido', $tocadas->pluck('id_detalle_pedido'))
+                    ->update(['operador_id' => $operadorDestino->id]);
+            } else {
+                $pedido->detalles()
+                    ->whereIn('id_detalle_pedido', $lineas->pluck('id_detalle_pedido'))
+                    ->update(['operador_id' => null]);
+            }
+
+            // La cabecera queda con el operador de la primera linea asignada:
+            // es solo informativa, la asignacion real vive en cada linea.
+            $operadorPrincipal = $pedido->detalles()
+                ->whereNotNull('operador_id')
+                ->orderBy('id_detalle_pedido')
+                ->value('operador_id');
+
+            $pedido->update(['operador_id' => $operadorPrincipal]);
+
+            $asignadas = $operadorDestino
+                ? $pedido->detalles()
+                    ->where('operador_id', $operadorDestino->id)
+                    ->where('surtido', false)
+                    ->count()
+                : 0;
+
+            $libres = $pedido->detalles()
+                ->whereNull('operador_id')
+                ->where('surtido', false)
+                ->count();
+
+            $sufijo = '';
+
+            if ($filtraBodega) {
+                $sufijo = $idBodega === 0
+                    ? ' (sin bodega)'
+                    : ' ('.(Bodega::find($idBodega)?->nombre ?? 'bodega '.$idBodega).')';
+            }
+
+            $mensaje = $operadorDestino
+                ? "Se asignaron {$asignadas} productos a {$operadorDestino->username}{$sufijo}."
+                : ($filtraBodega
+                    ? "Asignacion{$sufijo} liberada."
+                    : 'Asignacion liberada.');
+
+            if ($libres > 0) {
+                $mensaje .= " Quedan {$libres} productos sin asignar en el pedido.";
+            }
 
             app(AuditoriaService::class)->registrar(
                 'ASIGNAR',
                 'PEDIDOS',
-                'Pedido asignado a un operador.',
+                $mensaje,
                 [
                     'id_pedido' => $pedido->id_pedido,
                     'operador_id' => $pedido->operador_id,
+                    'bodega_id' => $idBodega,
+                    'lineas_asignadas' => $asignadas,
+                    'lineas_libres' => $libres,
                 ],
                 request()
             );
 
             return [
                 'error' => false,
+                'message' => $mensaje,
                 'pedido' => $pedido->refresh()->load([
                     'cliente',
-                    'detalles.producto',
+                    'detalles.producto.bodega',
+                    'detalles.operador:id,name,username',
                     'operador:id,name,username',
                 ]),
             ];
@@ -447,17 +629,15 @@ class PedidoController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => $resultado['pedido']->operador_id
-                ? 'Pedido asignado correctamente.'
-                : 'Asignación del pedido liberada.',
+            'message' => $resultado['message'],
             'pedido' => $resultado['pedido'],
         ]);
     }
 
     /**
-     * El operario toma un pedido que todavía no tiene dueño. La actualización
-     * es condicional (operador_id sigue nulo) para que dos operarios no puedan
-     * quedarse con el mismo pedido.
+     * El operario toma para si las lineas del pedido que le corresponden
+     * (las de su bodega) y que todavia esten libres. Un pedido puede mezclar
+     * bodegas, por eso no se toma entero: cada operador se queda con las suyas.
      */
     public function tomar(Request $request, Pedido $pedido)
     {
@@ -468,16 +648,6 @@ class PedidoController extends Controller
                 'status' => 'error',
                 'message' => 'Debes iniciar sesión para tomar un pedido.',
             ], 401);
-        }
-
-        // El operador solo puede tomar pedidos de su bodega asignada
-        try {
-            $this->validarBodegaDelPedido($usuario, $pedido);
-        } catch (\InvalidArgumentException $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage(),
-            ], 422);
         }
 
         $resultado = DB::transaction(function () use ($pedido, $usuario) {
@@ -493,45 +663,71 @@ class PedidoController extends Controller
                 ];
             }
 
-            if ($pedido->operador_id !== null) {
-                if ((int) $pedido->operador_id !== (int) $usuario->id) {
+            // Lineas todavia libres que le tocan a este operador.
+            $libres = $pedido->detalles()
+                ->with('producto')
+                ->whereNull('operador_id')
+                ->where('surtido', false)
+                ->get()
+                ->filter(fn (DetallePedido $detalle): bool => $this->lineaCorrespondeAlOperador($usuario, $detalle->producto));
+
+            if ($libres->isEmpty()) {
+                $yaTiene = $pedido->detalles()
+                    ->where('operador_id', $usuario->id)
+                    ->where('surtido', false)
+                    ->exists();
+
+                if ($yaTiene) {
                     return [
-                        'error' => true,
-                        'status' => 409,
-                        'message' => 'Otro operador ya tomó este pedido.',
+                        'error' => false,
+                        'message' => 'Ya tienes productos asignados en este pedido.',
+                        'pedido' => $pedido->load([
+                            'cliente',
+                            'detalles.producto.bodega',
+                            'detalles.operador:id,name,username',
+                            'operador:id,name,username',
+                        ]),
                     ];
                 }
 
                 return [
-                    'error' => false,
-                    'pedido' => $pedido->load([
-                        'cliente',
-                        'detalles.producto',
-                        'operador:id,name,username',
-                    ]),
+                    'error' => true,
+                    'status' => 409,
+                    'message' => 'No quedan productos de tu bodega en este pedido.',
                 ];
             }
 
-            $pedido->update([
-                'operador_id' => $usuario->id,
-            ]);
+            $pedido->detalles()
+                ->whereIn('id_detalle_pedido', $libres->pluck('id_detalle_pedido'))
+                ->update(['operador_id' => $usuario->id]);
+
+            // La cabecera queda con el operador de la primera linea asignada.
+            $operadorPrincipal = $pedido->detalles()
+                ->whereNotNull('operador_id')
+                ->orderBy('id_detalle_pedido')
+                ->value('operador_id');
+
+            $pedido->update(['operador_id' => $operadorPrincipal]);
 
             app(AuditoriaService::class)->registrar(
                 'TOMAR',
                 'PEDIDOS',
-                'Pedido tomado por un operador.',
+                "Operador tomó {$libres->count()} productos del pedido.",
                 [
                     'id_pedido' => $pedido->id_pedido,
                     'operador_id' => $usuario->id,
+                    'lineas' => $libres->pluck('id_detalle_pedido')->all(),
                 ],
                 request()
             );
 
             return [
                 'error' => false,
+                'message' => "Tomaste {$libres->count()} productos. Ya puedes surtirlos.",
                 'pedido' => $pedido->refresh()->load([
                     'cliente',
-                    'detalles.producto',
+                    'detalles.producto.bodega',
+                    'detalles.operador:id,name,username',
                     'operador:id,name,username',
                 ]),
             ];
@@ -546,7 +742,7 @@ class PedidoController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Pedido asignado a tu usuario. Ya puedes surtirlo.',
+            'message' => $resultado['message'] ?? 'Pedido asignado a tu usuario. Ya puedes surtirlo.',
             'pedido' => $resultado['pedido'],
         ]);
     }
@@ -571,10 +767,31 @@ class PedidoController extends Controller
     }
 
     /**
-     * Un operador con bodega asignada solo puede hacerse cargo de pedidos
-     * cuyos productos estén TODOS en su bodega (o sin bodega asignada).
+     * Una linea (producto) le corresponde al operador si el producto esta en
+     * su bodega. Si el operador no tiene bodega asignada puede con cualquier
+     * producto. Un producto sin bodega no le corresponde a nadie: hay que
+     * ubicarlo antes de poder surtirlo.
+     */
+    private function lineaCorrespondeAlOperador(?User $operador, ?Producto $producto): bool
+    {
+        if (! $operador || ! $producto) {
+            return false;
+        }
+
+        if (! $operador->bodega_id) {
+            return true;
+        }
+
+        return $producto->bodega_id !== null
+            && (int) $producto->bodega_id === (int) $operador->bodega_id;
+    }
+
+    /**
+     * Un operador con bodega asignada solo puede surtir productos que
+     * pertenezcan a su propia bodega (o sin bodega asignada, que no puede
+     * ubicarse y por tanto no surtirse).
      *
-     * @param  array<int, array{id_producto: int}>  $detalles
+     * @param  array<int>  $idProductos
      *
      * @throws \InvalidArgumentException
      */
@@ -604,14 +821,6 @@ class PedidoController extends Controller
                 '. Asígnalo a un operador de la bodega correcta.'
             );
         }
-    }
-
-    private function validarBodegaDelPedido(User $operador, Pedido $pedido): void
-    {
-        $this->validarBodegaDelOperador(
-            $operador,
-            $pedido->detalles()->pluck('id_producto')->all()
-        );
     }
 
     public function update(
@@ -819,26 +1028,46 @@ class PedidoController extends Controller
                     }
                 }
 
+                // Se conserva la asignacion y el surtido de cada producto
+                // mientras el producto siga en el pedido.
+                $conservar = $detallesActuales->mapWithKeys(fn ($detalle) => [
+                    $detalle->id_producto => [
+                        'operador_id' => $detalle->operador_id,
+                        'surtido' => $detalle->surtido,
+                    ],
+                ]);
+
                 $pedido->detalles()->delete();
 
                 foreach ($nuevos as $detalle) {
                     $producto = $productos[$detalle['id_producto']];
                     $importe = $importes[$detalle['id_producto']];
+                    $anterior = $conservar[$detalle['id_producto']] ?? null;
 
                     $pedido->detalles()->create([
                         'id_producto' => $producto->id_producto,
+
+                        'operador_id' => $anterior['operador_id'] ?? null,
 
                         'cantidad' => $detalle['cantidad'],
 
                         'precio_unitario' => $importe['precio_unitario'],
 
                         'subtotal' => $importe['subtotal'],
+
+                        'surtido' => $anterior['surtido'] ?? false,
                     ]);
                 }
+
+                $operadorPrincipal = $pedido->detalles()
+                    ->whereNotNull('operador_id')
+                    ->orderBy('id_detalle_pedido')
+                    ->value('operador_id');
 
                 $pedido->update([
                     'id_cliente' => $datos['id_cliente'],
                     'fecha_pedido' => $datos['fecha_pedido'],
+                    'operador_id' => $operadorPrincipal,
                     'total' => $totalCentavos / 100,
                     'observaciones' => $datos['observaciones'] ?? null,
                 ]);
@@ -855,7 +1084,8 @@ class PedidoController extends Controller
                     'error' => false,
                     'pedido' => $pedido->load([
                         'cliente',
-                        'detalles.producto',
+                        'detalles.producto.bodega',
+                        'detalles.operador:id,name,username',
                     ]),
                 ];
             });
@@ -904,52 +1134,78 @@ class PedidoController extends Controller
         }
 
         try {
-            $pedido = DB::transaction(function () use ($request, $pedido) {
+            $resultado = DB::transaction(function () use ($request, $pedido) {
                 $pedido = Pedido::where('id_pedido', $pedido->id_pedido)
                     ->lockForUpdate()
                     ->firstOrFail();
 
                 $usuario = $request->user();
 
-                if (
-                    $pedido->operador_id !== null &&
-                    (int) $pedido->operador_id !== (int) ($usuario?->id ?? 0)
-                ) {
+                if (! $usuario) {
                     throw new \InvalidArgumentException(
-                        'Este pedido está asignado a otro operador. No puedes surtirlo.'
+                        'Debes iniciar sesión para surtir un pedido.'
                     );
                 }
 
-                // Blindaje: aunque un pedido quedara mal asignado, el operador
-                // solo puede surtir pedidos de su propia bodega.
-                if ($usuario) {
-                    $this->validarBodegaDelPedido($usuario, $pedido);
+                // Cada operador solo surte SUS lineas: las asignadas a el que
+                // todavia no se han surtido. Las de otras bodegas quedan para
+                // el operador que les corresponda.
+                $lineasPropias = $pedido->detalles()
+                    ->with('producto')
+                    ->where('operador_id', $usuario->id)
+                    ->where('surtido', false)
+                    ->get();
+
+                if ($lineasPropias->isEmpty()) {
+                    throw new \InvalidArgumentException(
+                        'Este pedido no tiene productos asignados a tu usuario (o ya los surtiste).'
+                    );
                 }
 
-                if ($pedido->operador_id === null && $usuario) {
+                // Blindaje: sus lineas deben ser de su propia bodega.
+                $this->validarBodegaDelOperador(
+                    $usuario,
+                    $lineasPropias->pluck('id_producto')->all()
+                );
+
+                if ($pedido->operador_id === null) {
                     $pedido->update([
                         'operador_id' => $usuario->id,
                     ]);
                 }
 
-                $this->stockService->surtir($pedido);
+                $this->stockService->surtir($pedido, $usuario->id);
 
                 $pedido = $pedido->refresh()->load([
                     'cliente',
-                    'detalles.producto',
+                    'detalles.producto.bodega',
+                    'detalles.operador:id,name,username',
                     'operador:id,name,username',
                     'movimientos',
                 ]);
 
+                $avance = $pedido->avance_surtido;
+
+                $mensaje = $avance['pendientes'] > 0
+                    ? "Surtiste tus productos. Quedan {$avance['pendientes']} de otra bodega por surtir."
+                    : 'Pedido surtido correctamente. El inventario fue actualizado.';
+
                 app(AuditoriaService::class)->registrar(
                     'SURTIR',
                     'PEDIDOS',
-                    'Pedido surtido.',
-                    ['id_pedido' => $pedido->id_pedido],
+                    $mensaje,
+                    [
+                        'id_pedido' => $pedido->id_pedido,
+                        'operador_id' => $usuario->id,
+                        'avance' => $avance,
+                    ],
                     request()
                 );
 
-                return $pedido;
+                return [
+                    'pedido' => $pedido,
+                    'mensaje' => $mensaje,
+                ];
             });
         } catch (\InvalidArgumentException $e) {
             return response()->json([
@@ -960,8 +1216,8 @@ class PedidoController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Pedido surtido correctamente. El inventario fue actualizado.',
-            'pedido' => $pedido,
+            'message' => $resultado['mensaje'],
+            'pedido' => $resultado['pedido'],
         ]);
     }
 
@@ -971,7 +1227,7 @@ class PedidoController extends Controller
             'correo' => ['nullable', 'email', 'max:255'],
         ]);
 
-        $pedido->loadMissing(['cliente', 'detalles.producto']);
+        $pedido->loadMissing(['cliente', 'detalles.producto.bodega', 'detalles.operador:id,name,username']);
 
         $destinatario = $datos['correo'] ?? $pedido->cliente?->correo ?? null;
 
@@ -1027,7 +1283,8 @@ class PedidoController extends Controller
 
             return $pedido->load([
                 'cliente',
-                'detalles.producto',
+                'detalles.producto.bodega',
+                'detalles.operador:id,name,username',
             ]);
         });
 
@@ -1071,7 +1328,8 @@ class PedidoController extends Controller
 
             return $pedido->load([
                 'cliente',
-                'detalles.producto',
+                'detalles.producto.bodega',
+                'detalles.operador:id,name,username',
             ]);
         });
 
@@ -1087,7 +1345,8 @@ class PedidoController extends Controller
             'message' => 'Pedido entregado correctamente.',
             'pedido' => $pedido->load([
                 'cliente',
-                'detalles.producto',
+                'detalles.producto.bodega',
+                'detalles.operador:id,name,username',
             ]),
         ]);
     }
@@ -1104,7 +1363,8 @@ class PedidoController extends Controller
 
                 $pedido = $pedido->refresh()->load([
                     'cliente',
-                    'detalles.producto',
+                    'detalles.producto.bodega',
+                    'detalles.operador:id,name,username',
                 ]);
 
                 app(AuditoriaService::class)->registrar(
@@ -1157,7 +1417,8 @@ class PedidoController extends Controller
             'message' => 'Pedido aceptado correctamente.',
             'pedido' => $pedido->load([
                 'cliente',
-                'detalles.producto',
+                'detalles.producto.bodega',
+                'detalles.operador:id,name,username',
             ]),
         ]);
     }

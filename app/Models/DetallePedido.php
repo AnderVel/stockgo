@@ -14,15 +14,19 @@ class DetallePedido extends Model
     protected $fillable = [
         'id_pedido',
         'id_producto',
+        'operador_id',
         'cantidad',
         'precio_unitario',
         'subtotal',
+        'surtido',
     ];
 
     protected $casts = [
         'cantidad' => 'integer',
         'precio_unitario' => 'decimal:2',
         'subtotal' => 'decimal:2',
+        'operador_id' => 'integer',
+        'surtido' => 'boolean',
     ];
 
     public function pedido(): BelongsTo
@@ -40,6 +44,16 @@ class DetallePedido extends Model
             Producto::class,
             'id_producto',
             'id_producto'
+        );
+    }
+
+    /** Operador asignado a esta linea (puede variar dentro del mismo pedido). */
+    public function operador(): BelongsTo
+    {
+        return $this->belongsTo(
+            User::class,
+            'operador_id',
+            'id'
         );
     }
 }

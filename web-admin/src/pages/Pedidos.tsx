@@ -15,6 +15,11 @@ type ClientePedido = {
   estado: string
 }
 
+type BodegaRef = {
+  id: number
+  nombre: string
+}
+
 type ProductoCatalogo = {
   id_producto: number
   nombre: string
@@ -24,6 +29,7 @@ type ProductoCatalogo = {
   stock_disponible: number
   ubicacion: string | null
   estado: string
+  bodega?: BodegaRef | null
 }
 
 type LineaPedido = {
@@ -38,9 +44,13 @@ type LineaPedido = {
 
 type DetallePedido = {
   id_detalle_pedido: number
+  id_producto: number
   cantidad: number
   precio_unitario: number | string
   subtotal: number | string
+  operador_id?: number | null
+  surtido?: boolean
+  operador?: OperadorAsignado | null
   producto?: ProductoCatalogo
 }
 
@@ -53,6 +63,7 @@ type OperadorAsignado = {
 type OperadorOpcion = OperadorAsignado & {
   rol: string
   activo: boolean
+  bodega_id?: number | null
 }
 
 type Pedido = {
@@ -66,6 +77,7 @@ type Pedido = {
   observaciones: string | null
   cliente?: ClientePedido
   detalles?: DetallePedido[]
+  avance_surtido?: { surtidos: number; total: number; pendientes: number }
 }
 
 type PedidoDetalleVista = {
@@ -75,6 +87,9 @@ type PedidoDetalleVista = {
   cantidad: number
   precio_unitario: number
   subtotal: number
+  bodega: string
+  operador: string
+  surtido: boolean
 }
 
 const estadosPedido = ['PENDIENTE', 'SURTIDO', 'ENVIADO', 'ENTREGADO', 'CANCELADO']
@@ -92,6 +107,59 @@ function fechaLocal(): string {
 
 function precioEnCentavos(precio: number | string): number {
   return Math.round(Number(precio) * 100)
+}
+
+type GrupoBodega = {
+  bodegaId: number
+  bodegaNombre: string
+  detalles: DetallePedido[]
+  operadorId: number | null
+  operadorNombre: string | null
+}
+
+/**
+ * Agrupa las líneas del pedido por bodega. Cada grupo se asigna por separado,
+ * porque un mismo pedido puede mezclar bodegas y cada una tiene su operador.
+ */
+function gruposPorBodega(detalles: DetallePedido[]): GrupoBodega[] {
+  const grupos = new Map<number, GrupoBodega>()
+
+  for (const detalle of detalles) {
+    const bodegaId = detalle.producto?.bodega?.id ?? 0
+    const bodegaNombre = detalle.producto?.bodega?.nombre ?? 'Sin bodega'
+
+    const grupo = grupos.get(bodegaId) ?? {
+      bodegaId,
+      bodegaNombre,
+      detalles: [],
+      operadorId: null,
+      operadorNombre: null,
+    }
+
+    grupo.detalles.push(detalle)
+    grupos.set(bodegaId, grupo)
+  }
+
+  for (const grupo of grupos.values()) {
+    const responsables = new Set(
+      grupo.detalles
+        .filter((detalle) => detalle.operador_id)
+        .map((detalle) => Number(detalle.operador_id)),
+    )
+
+    if (responsables.size === 1) {
+      const [id] = responsables
+
+      grupo.operadorId = id
+      grupo.operadorNombre =
+        grupo.detalles.find((detalle) => Number(detalle.operador_id) === id)?.operador?.name ??
+        `Operador #${id}`
+    } else if (responsables.size > 1) {
+      grupo.operadorNombre = 'Varios operadores'
+    }
+  }
+
+  return [...grupos.values()].sort((a, b) => a.bodegaId - b.bodegaId)
 }
 
 export default function Pedidos() {
@@ -114,7 +182,8 @@ export default function Pedidos() {
   const [enviarError, setEnviarError] = useState<string | null>(null)
   const [asignarPedido, setAsignarPedido] = useState<Pedido | null>(null)
   const [operadores, setOperadores] = useState<OperadorOpcion[]>([])
-  const [operadorSeleccionado, setOperadorSeleccionado] = useState('')
+  // Operador elegido por cada bodega del pedido (id de bodega -> id de operador)
+  const [asignaciones, setAsignaciones] = useState<Record<number, string>>({})
   const [operadoresLoading, setOperadoresLoading] = useState(false)
   const [operadoresError, setOperadoresError] = useState<string | null>(null)
   const [clientQuery, setClientQuery] = useState('')
@@ -498,7 +567,14 @@ export default function Pedidos() {
 
   const openAsignar = async (row: Pedido) => {
     setAsignarPedido(row)
-    setOperadorSeleccionado(row.operador_id ? String(row.operador_id) : '')
+
+    const iniciales: Record<number, string> = {}
+
+    for (const grupo of gruposPorBodega(row.detalles ?? [])) {
+      iniciales[grupo.bodegaId] = grupo.operadorId ? String(grupo.operadorId) : ''
+    }
+
+    setAsignaciones(iniciales)
     setOperadoresError(null)
     setOperadoresLoading(true)
 
@@ -523,20 +599,51 @@ export default function Pedidos() {
     }
 
     const idPedido = asignarPedido.id_pedido
-    const operadorId = operadorSeleccionado ? Number(operadorSeleccionado) : null
+    const grupos = gruposPorBodega(asignarPedido.detalles ?? [])
 
-    const wasAssigned = await act(
-      idPedido,
-      () => orderService.asignar(idPedido, operadorId),
-      operadorId ? 'Pedido asignado al operador.' : 'Asignación del pedido liberada.',
+    // Solo se envían los grupos cuyo operador cambió; cada llamada afecta
+    // únicamente a los productos de esa bodega.
+    const cambios = grupos.filter(
+      (grupo) =>
+        (asignaciones[grupo.bodegaId] ?? '') !==
+        (grupo.operadorId ? String(grupo.operadorId) : ''),
     )
 
-    if (wasAssigned) {
+    if (cambios.length === 0) {
       setAsignarPedido(null)
+
+      return
+    }
+
+    setBusy(idPedido)
+
+    try {
+      const mensajes: string[] = []
+
+      for (const grupo of cambios) {
+        const valor = asignaciones[grupo.bodegaId] ?? ''
+        const respuesta = await orderService.asignar(
+          idPedido,
+          valor ? Number(valor) : null,
+          grupo.bodegaId,
+        )
+
+        if (respuesta?.message) {
+          mensajes.push(respuesta.message)
+        }
+      }
+
+      showToast(mensajes.join(' ') || 'Asignación guardada.', 'success')
+      setAsignarPedido(null)
+      await load(page, estado)
 
       if (showDetail && detailPedido?.id_pedido === idPedido) {
         void viewDetail(idPedido)
       }
+    } catch (caught) {
+      showToast(caught instanceof Error ? caught.message : 'No fue posible guardar la asignación.', 'error')
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -945,9 +1052,45 @@ export default function Pedidos() {
               {
                 key: 'operador',
                 label: 'Operador',
-                render: (row: Pedido) => row.operador?.name || row.operador?.username || 'Sin asignar',
+                render: (row: Pedido) => {
+                  const grupos = gruposPorBodega(row.detalles ?? [])
+
+                  if (grupos.length === 0) {
+                    return row.operador?.name || row.operador?.username || 'Sin asignar'
+                  }
+
+                  if (grupos.length === 1) {
+                    return grupos[0].operadorNombre ?? 'Sin asignar'
+                  }
+
+                  return (
+                    <ul className="operador-por-bodega">
+                      {grupos.map((grupo) => (
+                        <li key={grupo.bodegaId}>
+                          <span className="bodega-etiqueta">{grupo.bodegaNombre}</span>
+                          <span>{grupo.operadorNombre ?? 'Sin asignar'}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                },
               },
-              { key: 'estado', label: 'Estado', render: (row: Pedido) => <StatusBadge estado={row.estado} /> },
+              {
+                key: 'estado',
+                label: 'Estado',
+                render: (row: Pedido) => (
+                  <>
+                    <StatusBadge estado={row.estado} />
+                    {row.avance_surtido &&
+                      row.avance_surtido.surtidos > 0 &&
+                      row.avance_surtido.pendientes > 0 && (
+                        <small className="pedido-avance">
+                          Surtido {row.avance_surtido.surtidos}/{row.avance_surtido.total}
+                        </small>
+                      )}
+                  </>
+                ),
+              },
               {
                 key: 'actions',
                 label: 'Acciones',
@@ -1445,30 +1588,66 @@ export default function Pedidos() {
         busy={busy === asignarPedido?.id_pedido}
       >
         <div className="confirm-copy">
-          <p>Elige al operador de almacén responsable de surtir este pedido.</p>
+          <p>Asigna los productos de cada bodega a su operador de almacén.</p>
           <small>
-            Solo el operador asignado podrá surtirlo desde la aplicación. Si lo dejas sin asignar,
-            cualquier operario podrá tomarlo; el primero que lo tome se queda con él.
+            Un pedido puede mezclar bodegas: cada grupo se surte por separado y el pedido queda
+            surtido cuando terminan todos. Si dejas un grupo sin asignar, lo tomará el primer
+            operario de esa bodega desde la aplicación.
           </small>
         </div>
 
-        <label className="pedido-observations" htmlFor="operador-asignado">
-          Operador de almacén
-          <select
-            id="operador-asignado"
-            className="filter-select"
-            value={operadorSeleccionado}
-            onChange={(event) => setOperadorSeleccionado(event.target.value)}
-            disabled={operadoresLoading || busy === asignarPedido?.id_pedido}
-          >
-            <option value="">Sin asignar</option>
-            {operadores.map((operador) => (
-              <option key={operador.id} value={operador.id}>
-                {operador.name || operador.username}
-              </option>
-            ))}
-          </select>
-        </label>
+        {asignarPedido &&
+          gruposPorBodega(asignarPedido.detalles ?? []).map((grupo) => (
+            <div className="grupo-bodega" key={grupo.bodegaId}>
+              <div className="grupo-bodega-titulo">
+                <strong>{grupo.bodegaNombre}</strong>
+                <small>
+                  {grupo.detalles.length} producto{grupo.detalles.length === 1 ? '' : 's'}
+                </small>
+              </div>
+
+              <ul className="grupo-bodega-productos">
+                {grupo.detalles.map((detalle) => (
+                  <li key={detalle.id_detalle_pedido}>
+                    {detalle.producto?.nombre ?? `Producto #${detalle.id_producto}`}
+                    <span> × {detalle.cantidad}</span>
+                    {detalle.surtido && <em> (ya surtido)</em>}
+                  </li>
+                ))}
+              </ul>
+
+              <label
+                className="pedido-observations"
+                htmlFor={`operador-bodega-${grupo.bodegaId}`}
+              >
+                Operador de {grupo.bodegaNombre}
+                <select
+                  id={`operador-bodega-${grupo.bodegaId}`}
+                  className="filter-select"
+                  value={asignaciones[grupo.bodegaId] ?? ''}
+                  onChange={(event) =>
+                    setAsignaciones((actual) => ({
+                      ...actual,
+                      [grupo.bodegaId]: event.target.value,
+                    }))
+                  }
+                  disabled={operadoresLoading || busy === asignarPedido?.id_pedido}
+                >
+                  <option value="">Sin asignar</option>
+                  {operadores
+                    .filter(
+                      (operador) =>
+                        !operador.bodega_id || Number(operador.bodega_id) === grupo.bodegaId,
+                    )
+                    .map((operador) => (
+                      <option key={operador.id} value={operador.id}>
+                        {operador.name || operador.username}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+          ))}
 
         {operadoresLoading && <small>Cargando operadores…</small>}
         {operadoresError && <small role="alert">{operadoresError}</small>}
@@ -1617,7 +1796,17 @@ function OrderDetail({ pedido }: { pedido: Pedido }) {
     cantidad: detail.cantidad,
     precio_unitario: Number(detail.precio_unitario),
     subtotal: Number(detail.subtotal),
+    bodega: detail.producto?.bodega?.nombre ?? 'Sin bodega',
+    operador: detail.operador?.name || detail.operador?.username || 'Sin asignar',
+    surtido: detail.surtido === true,
   }))
+
+  const grupos = gruposPorBodega(pedido.detalles ?? [])
+
+  const resumenOperador =
+    grupos.length === 0
+      ? pedido.operador?.name || pedido.operador?.username || 'Sin asignar'
+      : grupos.map((grupo) => `${grupo.bodegaNombre}: ${grupo.operadorNombre ?? 'Sin asignar'}`).join(' · ')
 
   return (
     <div className="pedido-detail">
@@ -1625,7 +1814,15 @@ function OrderDetail({ pedido }: { pedido: Pedido }) {
         <div><dt>Cliente</dt><dd>{pedido.cliente?.nombre || `#${pedido.id_cliente}`}</dd></div>
         <div><dt>Fecha</dt><dd>{formatDate(pedido.fecha_pedido)}</dd></div>
         <div><dt>Estado</dt><dd><StatusBadge estado={pedido.estado} /></dd></div>
-        <div><dt>Operador</dt><dd>{pedido.operador?.name || pedido.operador?.username || 'Sin asignar'}</dd></div>
+        <div><dt>Operador</dt><dd>{resumenOperador}</dd></div>
+        <div>
+          <dt>Avance de surtido</dt>
+          <dd>
+            {pedido.avance_surtido
+              ? `${pedido.avance_surtido.surtidos} de ${pedido.avance_surtido.total} productos`
+              : '—'}
+          </dd>
+        </div>
         <div><dt>Total</dt><dd>{formatCurrency(pedido.total)}</dd></div>
       </dl>
       <div className="pedido-detail-products">
@@ -1637,10 +1834,13 @@ function OrderDetail({ pedido }: { pedido: Pedido }) {
                 <tr>
                   <th scope="col">Código</th>
                   <th scope="col">Producto</th>
+                  <th scope="col">Bodega</th>
                   <th scope="col">Unidad</th>
                   <th scope="col">Cantidad</th>
                   <th scope="col">Precio unitario</th>
                   <th scope="col">Subtotal</th>
+                  <th scope="col">Operador</th>
+                  <th scope="col">Surtido</th>
                 </tr>
               </thead>
               <tbody>
@@ -1648,10 +1848,13 @@ function OrderDetail({ pedido }: { pedido: Pedido }) {
                   <tr key={`${product.codigo ?? product.nombre}-${index}`}>
                     <td>{product.codigo || '—'}</td>
                     <td>{product.nombre}</td>
+                    <td>{product.bodega}</td>
                     <td>{product.unidad_medida || '—'}</td>
                     <td>{product.cantidad}</td>
                     <td>{formatCurrency(product.precio_unitario)}</td>
                     <td>{formatCurrency(product.subtotal)}</td>
+                    <td>{product.operador}</td>
+                    <td>{product.surtido ? 'Surtido' : 'Pendiente'}</td>
                   </tr>
                 ))}
               </tbody>

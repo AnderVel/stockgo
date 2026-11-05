@@ -71,7 +71,15 @@ export const orderService = {
   list: (params: ListParams = {}) => api<PageResponse<any>>(`/pedidos${listQuery(params)}`),
   get: (id: number) => api(`/pedidos/${id}`),
   create: (data: any) => api('/pedidos', { method: 'POST', body: JSON.stringify(data) }),
-  asignar: (id: number, operadorId: number | null) => api(`/pedidos/${id}/asignar`, { method: 'POST', body: JSON.stringify({ operador_id: operadorId }) }),
+  asignar: (id: number, operadorId: number | null, bodegaId?: number) =>
+    api(`/pedidos/${id}/asignar`, {
+      method: 'POST',
+      body: JSON.stringify(
+        bodegaId === undefined
+          ? { operador_id: operadorId }
+          : { operador_id: operadorId, bodega_id: bodegaId },
+      ),
+    }),
   cancel: (id: number) => api(`/pedidos/${id}/cancelar`, { method: 'POST' }),
   surtir: (id: number) => api(`/pedidos/${id}/surtir`, { method: 'POST' }),
   entregar: (id: number, correo: string) => api(`/pedidos/${id}/entregar`, { method: 'POST', body: JSON.stringify({ correo }) }),
