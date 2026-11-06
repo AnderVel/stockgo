@@ -1,4 +1,8 @@
-const BASE = '/api/web'
+
+const BASE = (
+  import.meta.env.VITE_API_BASE_URL || '/api/web'
+).replace(/\/+$/, '')
+
 const SESSION_MARKER = 'stockgo_web_session'
 
 let accessToken: string | null = null
@@ -195,17 +199,20 @@ export const authService = {
     return {
       ok: authenticated,
       status:
-        !authenticated && Number.isInteger(body.code) &&
+        !authenticated &&
+        Number.isInteger(body.code) &&
         [401, 403, 422, 429].includes(body.code)
           ? body.code
           : response.status,
-      body: authenticated || !response.ok
-        ? body
-        : {
-            ...body,
-            message:
-              body.message || 'El servidor no devolvió una sesión válida.',
-          },
+      body:
+        authenticated || !response.ok
+          ? body
+          : {
+              ...body,
+              message:
+                body.message ||
+                'El servidor no devolvió una sesión válida.',
+            },
     }
   },
 
@@ -213,6 +220,7 @@ export const authService = {
 
   logout: () => {
     const token = getToken()
+
     return fetch(`${BASE}/auth/logout`, {
       method: 'POST',
       credentials: 'include',
@@ -224,5 +232,6 @@ export const authService = {
       .catch(() => undefined)
       .finally(clearSession)
   },
+
   me: () => api('/auth/me'),
 }
